@@ -1,0 +1,119 @@
+# ─────────────────────────────────────────
+#  Virtual Environments
+# ─────────────────────────────────────────
+overture_env/
+venv/
+.venv/
+env/
+ENV/
+.env
+
+# ─────────────────────────────────────────
+#  Python
+# ─────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+
+# ─────────────────────────────────────────
+#  Model Checkpoints & Weights
+# ─────────────────────────────────────────
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+checkpoints/
+runs/
+outputs/
+
+# ─────────────────────────────────────────
+#  Training Artifacts
+# ─────────────────────────────────────────
+*.log
+logs/
+wandb/
+mlruns/
+tensorboard/
+
+# ─────────────────────────────────────────
+#  Data Files
+# ─────────────────────────────────────────
+*.csv
+*.parquet
+*.feather
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+data/
+datasets/
+raw/
+
+# ─────────────────────────────────────────
+#  Jupyter Notebooks checkpoints
+# ─────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ─────────────────────────────────────────
+#  OS
+# ─────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ─────────────────────────────────────────
+#  IDE / Editor
+# ─────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# ─────────────────────────────────────────
+#  CUDA / GPU
+# ─────────────────────────────────────────
+*.cubin
+*.fatbin
+*.ptx
+
+# ─────────────────────────────────────────
+#  Secrets & Config
+# ─────────────────────────────────────────
+.env
+.env.local
+secrets.py
+config_local.py
+*.key
+*.pem
+
+# ─────────────────────────────────────────
+#  Sentence Transformers Cache
+# ─────────────────────────────────────────
+.cache/
+sentence_transformers/
