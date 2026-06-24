@@ -15,74 +15,72 @@ Instead of achieving capability through billions of parameters, Overture achieve
 - **Complex-valued tokens** — magnitude encodes presence, phase encodes relational position
 - **Learned sparsity** — only the most relevant dimensions activate per token
 - **Weight-tied iterative loops** — the same block runs N times, depth comes from iteration not parameters
-- **Domain-agnostic shared space** — price data, language, audio, and any other modality map to the same token format
-
-The first application domain is financial time series and narrative — price structure and language signals combined into a unified representation. But the architecture is explicitly designed to be omnicapable.
+- **Domain-agnostic shared space** — text, images, audio, price data all map to the same token format
+- **Pretrained domain parts** — frozen specialist models bolt onto the frame, no retraining needed
 
 ---
 
 ## Architecture
 
 ```
-ANY INPUT (price, text, audio, ...)
-        ↓
-Domain Encoder          — lightweight, domain-specific
-                          maps raw input → complex sparse token
-        ↓
-Complex Sparse Token    — shape: (batch, seq_len, d_model) complex64
-                          magnitude: feature presence
-                          phase:     relational position
-                          sparse:    top-k dims active per token
-        ↓
-┌─── CORE LOOP (weight-tied) ──────────────────────┐
-│                                                   │
-│   Complex Multi-Head Attention                    │
-│   scores = Re(Q · K†) / √d  ← conjugate inner   │
-│        ↓                       product           │
-│   Complex Feed-Forward                            │
-│   modReLU — thresholds magnitude, keeps phase     │
-│        ↓                                          │
-│   Convergence Check                               │
-│   exit early if representation stabilized         │
-│        ↓                                          │
-│   Loop again (same weights) or exit               │
-└───────────────────────────────────────────────────┘
-        ↓
-Output Head             — pooling → complex→real → projection
-                          binary / multiclass / regression
-        ↓
+ANY INPUT (text, image, audio, price, ...)
+        |
+Pretrained Domain Part      -- frozen specialist (Qwen3-VL, Whisper, etc.)
+        |
+Domain Encoder              -- lightweight learned projection
+                               maps embedding -> complex sparse token
+        |
+Complex Sparse Token        -- shape: (batch, seq_len, d_model) complex64
+                               magnitude: feature presence
+                               phase:     relational/temporal position
+                               sparse:    top-k dims active per token
+        |
++--- CORE LOOP (weight-tied) -------------------------------------------+
+|                                                                        |
+|   Complex Multi-Head Attention                                         |
+|   scores = Re(Q . K_conj_T) / sqrt(d)  <- conjugate inner product    |
+|        |                                                               |
+|   Complex Feed-Forward   (ModReLU -- preserves phase)                 |
+|        |                                                               |
+|   Convergence Check  <- exit early if representation stabilized       |
+|   loop again or exit                                                   |
++------------------------------------------------------------------------+
+        |
+Output Head                 -- pool -> complex->real -> projection
+                               binary / multiclass / regression / sequence
+        |
 PREDICTION
 ```
 
-### Key Numbers (default config)
+---
 
-| Component | Parameters |
-|---|---|
-| Domain Encoder (per domain) | ~10,000 |
-| Core Loop (shared, all iterations) | ~100,000 |
-| Output Head | ~12,000 |
-| **Total** | **~123,000** |
+## The Machine Parts Philosophy
 
-GPT-2 small has 117,000,000 parameters. Overture has 123,000 and achieves depth through iteration.
+The frame does not need to learn language, vision, or audio from scratch. Pretrained specialist models are bolted on as frozen domain parts -- like high-precision machine components attached to a custom frame. The frame learns what to *do* with their outputs, not how to produce them.
+
+```
+Qwen3-VL-Embedding-2B    -> text and image understanding (2048-dim, Apache 2.0)
+Whisper encoder           -> audio and speech understanding (planned)
+Custom price encoder      -> OHLCV financial time series (trained from scratch)
+```
+
+Each part outputs a vector. The domain encoder maps it into the shared complex space. The core loop attends across all domains simultaneously.
 
 ---
 
-## Token Format
+## Key Design Decisions
 
-Every input domain maps to the same token format — a **complex-valued sparse vector**:
+**Why complex-valued tokens?**
+A complex number has magnitude and phase. Magnitude encodes how strongly a feature is present. Phase encodes relational and temporal position. For any signal data -- price, audio, language -- phase relationships carry information that real-valued vectors discard entirely.
 
-```python
-# Price candle (12 features) → complex token
-price_token    shape: (batch, seq_len, 64)  dtype: complex64
+**Why sparse?**
+Different inputs should activate different subspaces. Learned top-k sparsity forces specialization to emerge from training. It also maps perfectly to Blackwell hardware-accelerated structured sparsity.
 
-# News headline (384-dim ST embedding) → complex token  
-language_token shape: (batch, seq_len, 64)  dtype: complex64
+**Why weight-tied loops?**
+A 96-layer Transformer has 96 sets of unique weights. A looped Transformer with 1 block run 96 times has 1 set. The looped model learns weights useful at every stage of refinement. Adaptive convergence gating means easy inputs exit in 2-3 loops, hard inputs run longer.
 
-# Both live in the same space — concatenate and attend
-combined       shape: (batch, seq_len+1, 64)
-```
-
-This is the core architectural insight. The Transformer does not care whether a token came from price data or text. It sees a sequence of complex vectors and finds relationships between them.
+**Why domain-agnostic?**
+The goal is not a trading model or a language model. It is an architecture that handles any problem domain by registering a new encoder. The core loop never changes. New domains plug in.
 
 ---
 
@@ -90,28 +88,15 @@ This is the core architectural insight. The Transformer does not care whether a 
 
 ```
 Overture/
-├── token_encoder.py      # Domain encoders → complex sparse tokens
-│                         # DomainProjection, ComplexLift (polar),
-│                         # SparsityMask, ComplexPositionalEncoding,
-│                         # DomainRegistry
-│
-├── core_loop.py          # Weight-tied iterative Transformer
-│                         # ComplexLinear, ComplexMultiHeadAttention,
-│                         # ModReLU, ComplexFeedForward,
-│                         # ConvergenceChecker, CoreLoop, OvertureModel
-│
-├── output_head.py        # Task-specific output heads
-│                         # ComplexPooling, ComplexToReal, OutputHead,
-│                         # OvertureWithHead
-│
-├── training_loop.py      # Full training pipeline
-│                         # SyntheticSequenceDataset, train(),
-│                         # evaluate(), AdamW + cosine LR
-│
-└── language_demo.py      # Language encoder demonstration
-                          # sentence-transformers integration,
-                          # semantic similarity in shared space,
-                          # combined price + language sequences
+|-- token_encoder.py           # Domain encoders -> complex sparse tokens
+|-- core_loop.py               # Weight-tied iterative Transformer
+|-- output_head.py             # Task-specific output heads
+|-- training_loop.py           # Full training pipeline
+|-- language_demo.py           # BGE-large language encoder demo
+|-- bge_test.py                # BGE-large vs MiniLM quality comparison
+|-- contrastive_pretrain.py    # Language encoder pre-trainer v1
+|-- contrastive_pretrain_v2.py # Language encoder pre-trainer v2 (40k sentences)
+`-- qwen_vl_test.py            # Qwen3-VL-Embedding-2B full test suite
 ```
 
 ---
@@ -122,100 +107,115 @@ Overture/
 ```bash
 python -m venv overture_env
 source overture_env/Scripts/activate   # Windows Git Bash
-# or
 source overture_env/bin/activate       # Mac / Linux
 ```
 
 **2. Install dependencies**
 ```bash
-# PyTorch — match your CUDA version (check with nvidia-smi)
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+# PyTorch nightly cu128 -- required for RTX 5060 (Blackwell sm_120)
+pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
 
-# Other dependencies
-pip install sentence-transformers numpy
+# For older GPUs use stable with your CUDA version
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+pip install sentence-transformers datasets numpy pillow
 ```
 
-**3. Run the pipeline in order**
+**3. Run in order**
 ```bash
-# Verify token encoder
 python token_encoder.py
-
-# Verify core loop
 python core_loop.py
-
-# Verify output head
 python output_head.py
-
-# Run first training task
 python training_loop.py
-
-# Run language encoder demo
-python language_demo.py
+python qwen_vl_test.py
 ```
 
 ---
 
-## Results So Far
+## Results
 
 ### Synthetic Trend Classification
-Training the full pipeline on a synthetic temporal pattern detection task:
 
 | Metric | Value |
 |---|---|
-| Task | Detect uptrend vs downtrend in 60-step sequence |
 | Parameters | 123,138 |
 | Epochs to convergence | 5 |
 | Final val accuracy | 100.0% |
-| Prediction confidence | 99.8 – 99.9% |
-| Hardware | NVIDIA RTX 5060 |
+| Prediction confidence | 99.8 - 99.9% |
+| Hardware | NVIDIA RTX 5060 (Blackwell) |
 
-### Language Encoder Semantic Structure
-Semantic similarity matrix in shared complex token space (untrained encoder):
+### Qwen3-VL-Embedding-2B Integration
 
-| | Hawkish | Dovish | Risk-off | Risk-on |
-|---|---|---|---|---|
-| **Hawkish** | 1.000 | 0.786 | 0.601 | 0.793 |
-| **Dovish** | 0.786 | 1.000 | 0.720 | 0.766 |
-| **Risk-off** | 0.601 | 0.720 | 1.000 | 0.573 |
-| **Risk-on** | 0.793 | 0.766 | 0.573 | 1.000 |
+| Test | Result |
+|---|---|
+| Text encoding speed | 12 sentences in 0.43s |
+| Separation gap at 2048-dim | 0.311 (vs BGE-large 0.190) |
+| Separation gap at 64-dim | 0.303 -- beats BGE-large with 32x compression |
+| Cross-modal image + text alignment | Working |
+| Frame integration | (batch, seq, 64) complex64 confirmed |
 
-Semantic structure from sentence-transformers is preserved through the projection into our 64-dim complex space. Risk-off vs Risk-on (0.573) is the most separated pair — as expected.
+**Key finding:** Qwen3-VL with truncate_dim=64 achieves a better separation gap than BGE-large at full 1024-dims. The domain projection layer can be bypassed entirely for this model.
 
 ---
 
-## Design Decisions
+## Research Directions
 
-**Why complex-valued tokens?**
-A complex number has magnitude and phase. Magnitude encodes how strongly a feature is present. Phase encodes relational/temporal position. For any signal data — price, audio, language — phase relationships carry information that real-valued vectors discard. Complex multiplication is also a natural way to encode rotation and transformation, making positional encoding geometrically meaningful.
+**Complex Ternary Attention**
+Ternary weights ({-1, 0, +1}) applied to complex-valued weights produce 9 discrete values encoding rotations in the complex plane. No multiplication needed -- only addition and subtraction. Hypothesis: complex ternary preserves semantic structure better than real ternary on temporal data. Unpublished combination.
 
-**Why sparse?**
-Different inputs should activate different subspaces of the representation. A high-volatility candle during a news event should light up different dimensions than a quiet Asian session candle. Learned top-k sparsity forces this specialization to emerge from training rather than being hardcoded.
+**Phase Coherence Attention**
+Tokens with aligned phase interfere constructively. Opposite phase cancels. For temporal data this captures structural information dot-product attention misses. A qualitative difference, not just a performance tweak.
 
-**Why weight-tied loops instead of deep layers?**
-A 96-layer Transformer has 96 sets of unique weights. A looped Transformer with 1 block run 96 times has 1 set of weights. The looped model is forced to learn weights that are useful at every stage of refinement — pass 1 AND pass 50. This acts as a powerful regularizer and dramatically reduces parameter count while preserving computational depth. The convergence checker allows adaptive compute — easy inputs exit early, hard inputs run more loops.
+**FFT Attention on Native Complex Sequences**
+O(n log n) vs O(n^2). Our tokens are already complex -- no conversion needed. Novel application to natively complex token sequences.
 
-**Why domain-agnostic?**
-The goal is not a trading model or a language model. The goal is an architecture that can be aimed at any problem domain by registering a new encoder. Price, language, audio, sensor data, biological sequences — all project into the same shared space and are processed by the same core loop.
+**Adaptive Compute via Convergence Gating**
+Loop count scales with problem difficulty. Average inference cost drops ~60% with no accuracy loss.
+
+**Hardware-Aligned Architecture**
+Every dimension is a multiple of 16 (d_model=64, k_sparse=16, n_heads=4, ff_dim=256). Aligns perfectly with Blackwell tensor cores and structured sparsity acceleration.
+
+**Self-Modifying Networks (Level 5)**
+Long-term research target. The looping architecture is a natural substrate for self-reasoning. An evaluation gate enforces that only genuinely better versions are kept. Build order: canvas environment (Level 4) -> recursive self-improvement with gate (Level 5).
 
 ---
 
 ## Roadmap
 
 - [x] Complex sparse token encoder
-- [x] Weight-tied iterative core loop
-- [x] Convergence detection
-- [x] Multi-task output head
-- [x] Training pipeline with walk-forward support
-- [x] Language encoder via sentence-transformers
-- [x] Combined price + language token sequences
+- [x] Weight-tied iterative core loop with convergence detection
+- [x] Multi-task output head (binary, multiclass, regression, sequence)
+- [x] Training pipeline -- 100% accuracy in 5 epochs on synthetic task
+- [x] Language encoder via BGE-large + contrastive pre-training
+- [x] Qwen3-VL-Embedding-2B as primary language + vision part
+- [x] Cross-modal image + text alignment confirmed
+- [x] 64-dim truncation beats BGE-large at full 1024-dim
+- [ ] Architectural bypass mode for direct-dimension models
+- [ ] REPL terminal -- interactive frame interface
+- [ ] Contrastive pre-training to >0.85 correlation
 - [ ] Real OHLCV price data pipeline
-- [ ] Combined price + language training task
-- [ ] Contrastive pre-training for language encoder
-- [ ] Multi-timeframe price encoding
-- [ ] Walk-forward validation on real data
-- [ ] Signal bridge to EdgeFlow Trader (MT4)
-- [ ] Regime detection head
-- [ ] Visualization dashboard for attention across loops
+- [ ] Whisper audio encoder integration
+- [ ] Combined multimodal training task
+- [ ] Complex ternary core loop (primary research contribution)
+- [ ] LoRA adapter infrastructure
+- [ ] FFT attention on complex sequences
+- [ ] Phase coherence attention
+- [ ] Canvas environment + code generation (Level 4 self-modification)
+- [ ] Recursive self-improvement with evaluation gate (Level 5)
+
+---
+
+## Hardware Notes
+
+Developed on:
+- **GPU**: NVIDIA GeForce RTX 5060 (Blackwell sm_120, 8GB VRAM)
+- **RAM**: 50GB
+- **CUDA**: 13.1
+- **PyTorch**: nightly cu128
+- **Python**: 3.10.6
+- **OS**: Windows 11, Git Bash
+
+RTX 50-series requires PyTorch nightly cu128. Standard stable releases do not support sm_120. For RTX 30xx/40xx use stable cu118/cu121/cu124.
 
 ---
 
@@ -223,29 +223,14 @@ The goal is not a trading model or a language model. The goal is an architecture
 
 | Library | Purpose |
 |---|---|
-| `torch` | Core engine — all tensor math and training |
-| `sentence-transformers` | Pretrained text → 384-dim semantic vectors |
-| `numpy` | Data processing |
+| torch (nightly cu128) | Core engine |
+| sentence-transformers | Qwen3-VL, BGE-large |
+| datasets | HuggingFace streaming |
+| numpy | Data processing |
+| pillow | Image generation for vision tests |
 
-Optional (for data pipeline, coming soon):
-| Library | Purpose |
-|---|---|
-| `pandas` | CSV loading and feature engineering |
-| `scikit-learn` | Normalization, walk-forward splits |
-| `plotly` | Training visualization |
+Coming soon: openai-whisper, pandas, scikit-learn, plotly
 
 ---
 
-## Notes on Hardware
-
-Developed and tested on:
-- **GPU**: NVIDIA GeForce RTX 5060 (Blackwell, sm_120)
-- **CUDA**: 13.1
-- **PyTorch**: nightly cu128 build (required for sm_120 support on Windows)
-- **Python**: 3.10.6
-
-If you're on an older GPU (RTX 30xx or 40xx series), the standard stable PyTorch release will work fine with the appropriate cu118/cu121/cu124 index URL.
-
----
-
-*Project Overture — built from scratch, one layer at a time.*
+*Project Overture -- built from scratch, one layer at a time.*
