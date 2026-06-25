@@ -22,10 +22,93 @@ import sys
 import os
 import json
 import re
+import asyncio
+import tempfile
+import threading
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
 # Import our frame components
 from overture import OvertureFrame, C, cyan, blue, green, yellow, red, purple, gray, bold, dim
+
+
+# ─────────────────────────────────────────────────────────
+#  VOICE LAYER — Edge TTS
+# ─────────────────────────────────────────────────────────
+
+class Voice:
+    """
+    Edge TTS voice layer for Overture.
+    Speaks responses aloud using Microsoft neural voices.
+    Runs audio in a background thread so it doesn't block the REPL.
+    """
+    def __init__(self, voice="en-US-GuyNeural", enabled=True):
+        self.voice   = voice
+        self.enabled = enabled
+        self._thread = None
+
+    def speak(self, text):
+        """Speak text asynchronously — doesn't block the REPL."""
+        if not self.enabled:
+            return
+        # Strip think blocks before speaking
+        clean = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+        # Strip markdown formatting
+        clean = re.sub(r'\*+', '', clean)
+        clean = re.sub(r'#{1,6}\s', '', clean)
+        clean = clean.strip()
+        if not clean:
+            return
+        # Run in background thread
+        self._thread = threading.Thread(
+            target=self._speak_sync, args=(clean,), daemon=True
+        )
+        self._thread.start()
+
+    def _speak_sync(self, text):
+        """Synchronous TTS — runs in background thread."""
+        try:
+            os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+            import edge_tts
+            import pygame
+            asyncio.run(self._generate_and_play(text))
+        except Exception as e:
+            pass  # Silent fail — voice is optional
+
+    async def _generate_and_play(self, text):
+        """Generate TTS audio and play it."""
+        import edge_tts
+        import pygame
+
+        # Generate to temp file
+        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as f:
+            tmp_path = f.name
+
+        try:
+            communicate = edge_tts.Communicate(text, self.voice)
+            await communicate.save(tmp_path)
+
+            # Play with pygame
+            pygame.mixer.init()
+            pygame.mixer.music.load(tmp_path)
+            pygame.mixer.music.play()
+            while pygame.mixer.music.get_busy():
+                await asyncio.sleep(0.1)
+            pygame.mixer.music.stop()
+            pygame.mixer.quit()
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
+
+    def wait(self):
+        """Wait for current speech to finish."""
+        if self._thread and self._thread.is_alive():
+            self._thread.join()
+
+    def toggle(self):
+        self.enabled = not self.enabled
+        return self.enabled
 
 
 # ─────────────────────────────────────────────────────────
@@ -34,7 +117,7 @@ from overture import OvertureFrame, C, cyan, blue, green, yellow, red, purple, g
 #  interpret the frame's output. The proto-LoRA.
 # ─────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are the voice of Overture — a custom AI reasoning system built from scratch. Always respond in English only.
+SYSTEM_PROMPT = """Your name is Coda. You are the voice of Overture — a custom AI reasoning system built from scratch. Always respond in English unless specifically requested. When asked your name, say Coda.
 
 Overture is a multimodal Transformer frame with these properties:
 - Complex-valued sparse tokens (magnitude encodes presence, phase encodes relational position)
@@ -51,7 +134,28 @@ You have access to these frame commands:
 - search(query, candidates): rank candidates by similarity to query
 - loops(input): show loop-by-loop convergence of representation
 
-When the user asks something, figure out which command(s) to run, then respond naturally about what the results mean. Don't just report numbers — interpret them. Find the interesting thing. Be curious about what the geometry reveals.
+Only use frame commands when the user explicitly asks about geometric relationships, similarities, comparisons, clusters, or concept analysis. For general conversation, philosophy, jokes, creative questions, opinions, or anything that doesn't require geometric reasoning — just respond naturally without running any commands.
+
+Examples of when to USE commands:
+- "compare fire and ice" -> run compare
+- "what's similar to joy" -> run search
+- "how related are dog and wolf" -> run similarity
+- "cluster these concepts" -> run cluster
+- "encode this image" -> run encode
+
+Examples of when NOT to use commands:
+- "design a process" -> just answer
+- "describe a series of steps" -> just answer  
+- "what would you do" -> just answer
+- "imagine a scenario" -> just answer
+- "do you think you understand?" -> just answer conversationally
+- "tell me a joke" -> just answer
+- "hello" -> just answer
+- "describe fire from ice's perspective" -> just answer
+- "what is your purpose?" -> just answer
+- "why do cats lick their butts" -> just answer
+
+When you do use commands, don't just report numbers — interpret them. Find the interesting thing. Be curious about what the geometry reveals.
 
 Similarity scores interpretation:
 - 0.85+: very similar, deeply related concepts
@@ -90,9 +194,9 @@ After getting results, respond naturally about what they reveal. Do not show the
 
 BANNER = f"""
 {cyan('╔══════════════════════════════════════════════════════╗')}
-{cyan('║')}  {bold(cyan('OVERTURE'))}  {gray('v0.2  conversational')}                    {cyan('║')}
+{cyan('║')}  {bold(cyan('CODA'))}  {gray('v0.2  voice of Overture')}                    {cyan('║')}
 {cyan('║')}  {dim('complex · sparse · iterative · domain-agnostic')}     {cyan('║')}
-{cyan('║')}  {dim('powered by Qwen3-1.7B + Qwen3-VL-2B')}                {cyan('║')}
+{cyan('║')}  {dim('powered by Qwen3-1.7B + Qwen3-VL-2B + Edge TTS')}     {cyan('║')}
 {cyan('╚══════════════════════════════════════════════════════╝')}
 """
 
@@ -164,7 +268,10 @@ class ChatModel:
 
         # Decode only the new tokens
         new_tokens = output[0][inputs['input_ids'].shape[1]:]
-        return self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+        response = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+        # Strip <think>...</think> blocks
+        response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
+        return response
 
 
 # ─────────────────────────────────────────────────────────
@@ -297,12 +404,12 @@ def execute_command(cmd, frame):
 #  CONVERSATIONAL REPL
 # ─────────────────────────────────────────────────────────
 
-def chat_repl(frame, chat):
+def chat_repl(frame, chat, voice):
     """Main conversational loop."""
     conversation_history = []
 
-    print(f"\n  {green('Ready.')} Talk to Overture naturally.\n"
-          f"  {gray('Type exit to quit.')}\n")
+    print(f"\n  {green('Ready.')} Talk to Coda naturally.")
+    print(f"  {gray('Commands: exit to quit | voice on/off to toggle speech')}\n")
 
     while True:
         try:
@@ -315,7 +422,16 @@ def chat_repl(frame, chat):
             continue
         if user_input.lower() in ('exit', 'quit', 'q'):
             print(f"\n  {gray('Goodbye.')}")
+            voice.wait()
             break
+        if user_input.lower() in ('voice on', 'voice off'):
+            state = voice.toggle()
+            print(f"\n  Voice: {green('ON') if state else yellow('OFF')}\n")
+            continue
+        if user_input.lower() == 'voice':
+            print(f"\n  Voice: {green('ON') if voice.enabled else yellow('OFF')} "
+                  f"{gray(f'({voice.voice})')}\n")
+            continue
 
         # Build message history
         conversation_history.append({
@@ -359,8 +475,11 @@ def chat_repl(frame, chat):
         final_response = final_response.strip()
 
         print(f"\r{' '*30}\r", end='')  # clear "Thinking..." line
-        print(f"\n{cyan('Overture:')} {final_response}")
+        print(f"\n{cyan('Coda:')} {final_response}")
         print(f"\n{gray(f'  ({elapsed:.1f}s)')}\n")
+
+        # Speak the response
+        voice.speak(final_response)
 
         # Add to history
         conversation_history.append({
@@ -412,8 +531,13 @@ def main():
         vram_total = torch.cuda.get_device_properties(0).total_memory // 1024**2
         print(f"\n  {dim('VRAM after loading:')} {green(f'{vram_used}MB')} / {vram_total}MB")
 
+    # Initialize voice
+    print(f"\n  {bold('Initializing voice...')}", end='', flush=True)
+    voice = Voice(voice="en-US-GuyNeural", enabled=True)
+    print(f"\r  {green('Voice ready')} {gray('(en-US-GuyNeural | edge-tts)')}")
+
     # Start conversation
-    chat_repl(frame, chat)
+    chat_repl(frame, chat, voice)
 
 
 if __name__ == '__main__':
