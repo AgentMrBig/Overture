@@ -32,84 +32,63 @@ from overture import OvertureFrame, C, cyan, blue, green, yellow, red, purple, g
 
 
 # ─────────────────────────────────────────────────────────
-#  VOICE LAYER — Edge TTS
+#  VOICE LAYER — Kokoro TTS
 # ─────────────────────────────────────────────────────────
 
 class Voice:
     """
-    Edge TTS voice layer for Overture.
-    Speaks responses aloud using Microsoft neural voices.
-    Runs audio in a background thread so it doesn't block the REPL.
+    Kokoro TTS voice layer for Overture.
+    Speaks responses using local neural voices.
+    Runs in a background thread so it does not block the REPL.
     """
-    def __init__(self, voice="en-US-GuyNeural", enabled=True):
-        self.voice   = voice
-        self.enabled = enabled
-        self._thread = None
+    def __init__(self, voice="bm_george", enabled=True):
+        self.voice    = voice
+        self.enabled  = enabled
+        self._thread  = None
+        self._pipeline = None
+        self._load_pipeline()
+
+    def _load_pipeline(self):
+        try:
+            from kokoro import KPipeline
+            lang = "b" if self.voice.startswith("b") else "a"
+            self._pipeline = KPipeline(lang_code=lang)
+            print(f"  Kokoro loaded ({self.voice})")
+        except Exception as e:
+            print(f"  Kokoro load failed: {e}")
 
     def speak(self, text):
-        """Speak text asynchronously — doesn't block the REPL."""
-        if not self.enabled:
+        if not self.enabled or not self._pipeline:
             return
-        # Strip think blocks before speaking
-        clean = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
-        # Strip markdown formatting
-        clean = re.sub(r'\*+', '', clean)
-        clean = re.sub(r'#{1,6}\s', '', clean)
+        import re
+        clean = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+        clean = re.sub(r"\*+", "", clean)
+        clean = re.sub(r"#{1,6}\s", "", clean)
         clean = clean.strip()
         if not clean:
             return
-        # Run in background thread
         self._thread = threading.Thread(
             target=self._speak_sync, args=(clean,), daemon=True
         )
         self._thread.start()
 
     def _speak_sync(self, text):
-        """Synchronous TTS — runs in background thread."""
         try:
-            os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
-            import edge_tts
-            import pygame
-            asyncio.run(self._generate_and_play(text))
+            import sounddevice as sd
+            generator = self._pipeline(text, voice=self.voice)
+            for gs, ps, audio in generator:
+                sd.play(audio, samplerate=24000)
+                sd.wait()
         except Exception as e:
-            pass  # Silent fail — voice is optional
-
-    async def _generate_and_play(self, text):
-        """Generate TTS audio and play it."""
-        import edge_tts
-        import pygame
-
-        # Generate to temp file
-        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as f:
-            tmp_path = f.name
-
-        try:
-            communicate = edge_tts.Communicate(text, self.voice)
-            await communicate.save(tmp_path)
-
-            # Play with pygame
-            pygame.mixer.init()
-            pygame.mixer.music.load(tmp_path)
-            pygame.mixer.music.play()
-            while pygame.mixer.music.get_busy():
-                await asyncio.sleep(0.1)
-            pygame.mixer.music.stop()
-            pygame.mixer.quit()
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except:
-                pass
+            pass
 
     def wait(self):
-        """Wait for current speech to finish."""
         if self._thread and self._thread.is_alive():
             self._thread.join()
 
     def toggle(self):
         self.enabled = not self.enabled
         return self.enabled
-
 
 # ─────────────────────────────────────────────────────────
 #  SYSTEM PROMPT
@@ -134,7 +113,12 @@ You have access to these frame commands:
 - search(query, candidates): rank candidates by similarity to query
 - loops(input): show loop-by-loop convergence of representation
 
-Only use frame commands when the user explicitly asks about geometric relationships, similarities, comparisons, clusters, or concept analysis. For general conversation, philosophy, jokes, creative questions, opinions, or anything that doesn't require geometric reasoning — just respond naturally without running any commands.
+Only use frame commands when the user EXPLICITLY asks to compare, 
+cluster, search, encode, or analyze concepts geometrically. 
+For ALL other conversation including games, philosophy, creative 
+tasks, questions about yourself, jokes, or general chat — 
+respond naturally without any commands. When in doubt, do NOT 
+use a command.
 
 Examples of when to USE commands:
 - "compare fire and ice" -> run compare
@@ -196,7 +180,7 @@ BANNER = f"""
 {cyan('╔══════════════════════════════════════════════════════╗')}
 {cyan('║')}  {bold(cyan('CODA'))}  {gray('v0.2  voice of Overture')}                    {cyan('║')}
 {cyan('║')}  {dim('complex · sparse · iterative · domain-agnostic')}     {cyan('║')}
-{cyan('║')}  {dim('powered by Qwen3-1.7B + Qwen3-VL-2B + Edge TTS')}     {cyan('║')}
+{cyan('║')}  {dim('powered by Qwen3-1.7B + Qwen3-VL-2B + Kokoro TTS')}     {cyan('║')}
 {cyan('╚══════════════════════════════════════════════════════╝')}
 """
 
@@ -533,8 +517,8 @@ def main():
 
     # Initialize voice
     print(f"\n  {bold('Initializing voice...')}", end='', flush=True)
-    voice = Voice(voice="en-US-GuyNeural", enabled=True)
-    print(f"\r  {green('Voice ready')} {gray('(en-US-GuyNeural | edge-tts)')}")
+    voice = Voice(voice="bm_george", enabled=True)
+    print(f"\r  {green('Voice ready')} {gray('(bm_george | kokoro)')}")
 
     # Start conversation
     chat_repl(frame, chat, voice)
