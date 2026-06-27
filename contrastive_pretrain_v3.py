@@ -579,7 +579,7 @@ if __name__ == '__main__':
 
     # Build student — input_dim=4096 to match Qwen3-8B
     registry = DomainRegistry(d_model=64, k_sparse=16)
-    registry.register('qwen', input_dim=INPUT_DIM)
+    registry.register('qwen', input_dim=INPUT_DIM, lift_mode='split')
     registry.to(device)
     student = StudentSimilarity(registry.encoders['qwen'], input_dim=INPUT_DIM, d_model=64)
     student.to(device)
