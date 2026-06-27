@@ -77,8 +77,8 @@ class Qwen3Embedder:
                 padding         = True,
             ).to(self.model.device)
             out    = self.model.model(**inputs)   # base transformer, bypasses LM head
-            hidden = out.last_hidden_state         # (B, seq, 4096)
-            mask   = inputs['attention_mask'].unsqueeze(-1).float()
+            hidden = out.last_hidden_state         # (B, seq, 4096) — may be on cuda:1
+            mask   = inputs['attention_mask'].unsqueeze(-1).float().to(hidden.device)
             emb    = (hidden * mask).sum(1) / mask.sum(1).clamp(min=1e-8)  # (B, 4096)
             all_embs.append(emb.float().cpu())
         embs = torch.cat(all_embs, dim=0)
