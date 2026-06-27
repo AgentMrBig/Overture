@@ -200,12 +200,12 @@ class ChatModel:
         self.tokenizer = None
 
     def load(self):
-        model_name = "Qwen/Qwen3-1.7B"
+        model_name = "Qwen/Qwen3-8B"
         print(f"  {dim('Loading Qwen3-4B (4-bit quantized)...')}", end='', flush=True)
         t0 = time.perf_counter()
 
         self.tokenizer = AutoTokenizer.from_pretrained(
-            "Qwen/Qwen3-1.7B",
+            "Qwen/Qwen3-8B",
             trust_remote_code=True,
         )
 
@@ -221,10 +221,34 @@ class ChatModel:
             quantization_config = bnb_config,
             device_map          = "auto",
             trust_remote_code   = True,
+            max_memory          = {0: "7.5GiB", "cpu": "40GiB"},
         )
 
         elapsed = time.perf_counter() - t0
-        print(f"\r  {green('Qwen3-1.7B loaded')} {gray(f'(4-bit, {elapsed:.1f}s)')}")
+        print(f"\r  {green('Qwen3-8B loaded')} {gray(f'(4-bit, {elapsed:.1f}s)')}")
+
+    def get_embeddings(self, texts: list) -> "torch.Tensor":
+        """Mean-pool last hidden states for use as embeddings. Returns (N, hidden_dim) normalized float tensor."""
+        all_embs = []
+        for text in texts:
+            inputs = self.tokenizer(
+                text,
+                return_tensors="pt",
+                truncation=True,
+                max_length=512,
+            ).to(self.model.device)
+            with torch.no_grad():
+                outputs = self.model(**inputs, output_hidden_states=True)
+            hidden = outputs.hidden_states[-1]           # (1, seq_len, hidden_dim)
+            mask   = inputs['attention_mask'].unsqueeze(-1).float()
+            emb    = (hidden * mask).sum(1) / mask.sum(1).clamp(min=1e-8)  # (1, hidden_dim)
+            all_embs.append(emb.squeeze(0))
+        embs = torch.stack(all_embs).float()             # (N, hidden_dim)
+        return embs / embs.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+
+    @property
+    def hidden_dim(self):
+        return self.model.config.hidden_size
 
     def generate(self, messages, max_new_tokens=512):
         """Generate a response given a message history."""

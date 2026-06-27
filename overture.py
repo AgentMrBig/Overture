@@ -86,30 +86,42 @@ class OvertureFrame:
     Provides clean encode/similarity/cluster methods for the REPL.
     """
 
-    def __init__(self, device, d_model=64, k_sparse=16, truncate_dim=64):
-        self.device      = device
-        self.d_model     = d_model
-        self.k_sparse    = k_sparse
-        self.truncate_dim= truncate_dim
-        self.qwen        = None
-        self.registry    = None
-        self.core        = None
+    def __init__(self, device, d_model=64, k_sparse=16, truncate_dim=None, embedder_name="Qwen/Qwen3-8B", shared_model=None):
+        self.device        = device
+        self.d_model       = d_model
+        self.k_sparse      = k_sparse
+        self.shared_model  = shared_model
+        self.embedder_name = embedder_name
+        self.qwen          = None
+        self.registry      = None
+        self.core          = None
+        # If using shared model, derive dim from it; else default 64 for SentenceTransformer
+        if truncate_dim is not None:
+            self.truncate_dim = truncate_dim
+        elif shared_model is not None:
+            self.truncate_dim = None  # resolved after load
+        else:
+            self.truncate_dim = 64
 
     def load(self):
-        from sentence_transformers import SentenceTransformer
         from token_encoder import DomainRegistry
         from core_loop import CoreLoop
 
-        print(f"  {dim('Loading Qwen3-VL-Embedding-2B...')}", end='', flush=True)
-        t0 = time.perf_counter()
-        self.qwen = SentenceTransformer(
-            "Qwen/Qwen3-VL-Embedding-2B",
-            trust_remote_code=True,
-            truncate_dim=self.truncate_dim,
-        )
-        self.qwen.to(self.device)
-        self.qwen_time = time.perf_counter() - t0
-        print(f"\r  {green('Qwen3-VL loaded')} {gray(f'({self.qwen_time:.1f}s, truncate_dim={self.truncate_dim})')}")
+        if self.shared_model is not None:
+            self.truncate_dim = self.shared_model.hidden_dim
+            print(f"  {green('Using shared Qwen3-8B for embeddings')} {gray(f'(hidden_dim={self.truncate_dim})')}")
+        else:
+            from sentence_transformers import SentenceTransformer
+            print(f"  {dim('Loading Qwen3-VL-Embedding-2B...')}", end='', flush=True)
+            t0 = time.perf_counter()
+            self.qwen = SentenceTransformer(
+                self.embedder_name,
+                trust_remote_code=True,
+                truncate_dim=self.truncate_dim,
+            )
+            self.qwen.to(self.device)
+            elapsed = time.perf_counter() - t0
+            print(f"\r  {green('Qwen3-VL loaded')} {gray(f'({elapsed:.1f}s, truncate_dim={self.truncate_dim})')}")
 
         print(f"  {dim('Building frame...')}", end='', flush=True)
         self.registry = DomainRegistry(d_model=self.d_model, k_sparse=self.k_sparse)
@@ -131,7 +143,9 @@ class OvertureFrame:
         print(f"\r  {green('Frame ready')} {gray(f'({total_params:,} params)')}")
 
     def _qwen_encode(self, inputs):
-        """Encode text or image paths with Qwen3-VL."""
+        """Encode text inputs using shared model or standalone SentenceTransformer."""
+        if self.shared_model is not None:
+            return self.shared_model.get_embeddings(inputs).to(self.device)
         with torch.no_grad():
             embs = self.qwen.encode(
                 inputs,

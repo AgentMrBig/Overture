@@ -152,13 +152,13 @@ async def startup():
     if device.type == 'cuda':
         print(f"GPU: {torch.cuda.get_device_name(0)}")
 
-    print("Loading frame...")
-    frame = OvertureFrame(device)
-    frame.load()
-
-    print("Loading Coda (Qwen3-1.7B)...")
+    print("Loading Qwen3-8B (shared model)...")
     chat = ChatModel(device)
     chat.load()
+
+    print("Building frame using shared model...")
+    frame = OvertureFrame(device, shared_model=chat)
+    frame.load()
 
     print("Initializing voice...")
     voice = Voice(voice="bm_george", enabled=True)
@@ -307,7 +307,7 @@ async def websocket_chat(ws: WebSocket, session_id: str):
 
             # First pass
             raw_response = await loop.run_in_executor(
-                None, lambda: chat.generate(messages, max_new_tokens=600)
+                None, lambda: chat.generate(messages, max_new_tokens=1000)
             )
 
             # Only run frame commands for prime personality
@@ -330,7 +330,7 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                     {"role": "user", "content": f"Frame results:\n{results_text}\n\nNow respond to the user naturally based on these results. Do not use commands in this response."}
                 ]
                 final = await loop.run_in_executor(
-                    None, lambda: chat.generate(follow_up, max_new_tokens=700)
+                    None, lambda: chat.generate(follow_up, max_new_tokens=1000)
                 )
             else:
                 final = raw_response
