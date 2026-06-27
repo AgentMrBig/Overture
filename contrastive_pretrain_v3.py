@@ -108,7 +108,7 @@ def build_corpus(target_size: int = 20000) -> list:
         ('rajpurkar/squad',      'train', 'context',  per,     3),
         ('dair-ai/emotion',      'train', 'text',     per,     1),
         ('nyu-mll/multi_nli',    'train', 'premise',  per,     1),
-        ('SetFit/sst2',          'train', 'text',     per,     1),
+        ('nyu-mll/multi_nli',    'train', 'hypothesis', per,   1),
     ]
 
     for ds_name, split, field, max_items, sents_per in sources:
