@@ -108,13 +108,14 @@ def build_corpus(target_size: int = 20000) -> list:
         ('rajpurkar/squad',      'train', 'context',  per,     3),
         ('dair-ai/emotion',      'train', 'text',     per,     1),
         ('nyu-mll/multi_nli',    'train', 'premise',  per,     1),
-        ('nyu-mll/multi_nli',    'train', 'hypothesis', per,   1),
     ]
 
     for ds_name, split, field, max_items, sents_per in sources:
+        if len(corpus) >= target_size:
+            break
         print(f"  {ds_name}...", end='', flush=True)
         try:
-            ds = load_dataset(ds_name, split=split, streaming=True)
+            ds = load_dataset(ds_name, split=split, streaming=True, trust_remote_code=True)
             count = 0
             for item in ds:
                 text = item.get(field, '').replace('\\n', ' ').strip()
@@ -127,7 +128,7 @@ def build_corpus(target_size: int = 20000) -> list:
                         if len(s.strip()) > 25:
                             add(s.strip() + '.')
                 count += 1
-                if count >= max_items:
+                if count >= max_items or len(corpus) >= target_size:
                     break
             print(f" {len(corpus):,}")
         except Exception as e:
