@@ -367,10 +367,7 @@ class PairDataset(Dataset):
 
     def __getitem__(self, idx):
         i, j = self.pairs[idx]
-        # Normalize target from [-1,1] to [0,1] to match student magnitude-based similarity
-        target = float(self.sim[i, j])
-        target = (target + 1.0) / 2.0
-        return self.embs[i], self.embs[j], torch.tensor(target, dtype=torch.float32)
+        return self.embs[i], self.embs[j], torch.tensor(self.sim[i, j], dtype=torch.float32)
 
 
 # ─────────────────────────────────────────────────────────
@@ -378,24 +375,33 @@ class PairDataset(Dataset):
 # ─────────────────────────────────────────────────────────
 
 class StudentSimilarity(nn.Module):
-    def __init__(self, encoder: TokenEncoder, input_dim: int = 4096, d_model: int = 64):
+    """Simple real-valued projection for stable pretraining.
+    Learns to map Qwen embeddings to a 64-dim space that preserves similarity geometry.
+    Weights are later transferred to the frame's DomainProjection."""
+    def __init__(self, encoder=None, input_dim: int = 4096, d_model: int = 64):
         super().__init__()
-        self.encoder = encoder
+        self.proj = nn.Sequential(
+            nn.Linear(input_dim, 512),
+            nn.LayerNorm(512),
+            nn.GELU(),
+            nn.Linear(512, d_model),
+        )
+        # Xavier init for stability
+        for m in self.proj.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight, gain=0.5)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
 
     def encode_one(self, emb):
-        # emb: (B, 4096) — TokenEncoder already has DomainProjection(4096→64) inside
-        tokens = self.encoder(emb.unsqueeze(1))   # (B, 1, d_model) complex
-        return tokens.squeeze(1)                   # (B, d_model) complex
+        x = self.proj(emb)
+        return x / x.norm(dim=-1, keepdim=True).clamp(min=1e-8)
 
     def forward(self, a, b):
-        ta   = self.encode_one(a)
-        tb   = self.encode_one(b)
-        ma   = ta.abs().float()
-        mb   = tb.abs().float()
-        dot  = (ma * mb).sum(dim=-1)
-        norm = ma.norm(dim=-1).clamp(min=1e-8) * mb.norm(dim=-1).clamp(min=1e-8)
-        sim  = dot / norm
-        return torch.nan_to_num(sim, nan=0.0)
+        ta  = self.encode_one(a)
+        tb  = self.encode_one(b)
+        sim = (ta * tb).sum(dim=-1)   # cosine sim of unit vectors
+        return torch.clamp(sim, -1.0, 1.0)
 
 
 # ─────────────────────────────────────────────────────────
@@ -430,10 +436,9 @@ def evaluate(student, embedder, sentences, device):
     qwen_sims, our_sims = [], []
     for i in range(n):
         for j in range(i + 1, n):
-            qs = (embs[i] @ embs[j]).item()
-            ma = tokens[i].abs().float()
-            mb = tokens[j].abs().float()
-            os_ = (ma @ mb / (ma.norm().clamp(min=1e-8) * mb.norm().clamp(min=1e-8))).item()
+            qs  = (embs[i] @ embs[j]).item()
+            # tokens are unit-normalized by encode_one; dot = cosine similarity
+            os_ = (tokens[i] @ tokens[j]).item()
             qwen_sims.append(qs)
             our_sims.append(os_)
 
@@ -580,11 +585,8 @@ if __name__ == '__main__':
     loader  = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True,
                          num_workers=0, pin_memory=(device.type == 'cuda'))
 
-    # Build student — input_dim=4096 to match Qwen3-8B
-    registry = DomainRegistry(d_model=64, k_sparse=16)
-    registry.register('qwen', input_dim=INPUT_DIM, lift_mode='split')
-    registry.to(device)
-    student = StudentSimilarity(registry.encoders['qwen'], input_dim=INPUT_DIM, d_model=64)
+    # Build student — simple real-valued projection, numerically stable
+    student = StudentSimilarity(input_dim=INPUT_DIM, d_model=64)
     student.to(device)
     print(f"\nStudent parameters: {sum(p.numel() for p in student.parameters()):,}")
 
@@ -601,7 +603,7 @@ if __name__ == '__main__':
 
     # Load best (if training improved at all)
     if best_state is not None:
-        registry.encoders['qwen'].load_state_dict(best_state)
+        student.load_state_dict(best_state)
 
     # Final eval
     final_corr = evaluate(student, embedder, val_sentences, device)
@@ -611,7 +613,7 @@ if __name__ == '__main__':
     # Save
     out_path = 'qwen_encoder_pretrained.pt'
     torch.save({
-        'encoder_state': registry.encoders['qwen'].state_dict(),
+        'encoder_state': student.state_dict(),
         'd_model'      : 64,
         'k_sparse'     : 16,
         'input_dim'    : INPUT_DIM,
