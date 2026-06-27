@@ -72,6 +72,31 @@ class Voice:
         )
         self._thread.start()
 
+    def synthesize(self, text) -> bytes:
+        """Generate audio and return as WAV bytes (for browser playback)."""
+        import io, wave, numpy as np
+        clean = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+        clean = re.sub(r"\*+", "", clean)
+        clean = re.sub(r"#{1,6}\s", "", clean)
+        clean = clean.strip()
+        if not clean or not self._pipeline:
+            return b""
+        chunks = []
+        for gs, ps, audio in self._pipeline(clean, voice=self.voice):
+            if audio is not None:
+                chunks.append(audio)
+        if not chunks:
+            return b""
+        combined = np.concatenate(chunks)
+        pcm = (combined * 32767).clip(-32768, 32767).astype(np.int16)
+        buf = io.BytesIO()
+        with wave.open(buf, 'wb') as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(24000)
+            wf.writeframes(pcm.tobytes())
+        return buf.getvalue()
+
     def _speak_sync(self, text):
         try:
             import sounddevice as sd

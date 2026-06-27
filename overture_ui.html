@@ -775,7 +775,7 @@
 
   // ── WEBSOCKET ──
   function connect() {
-    ws = new WebSocket(`ws://${location.host}/ws/${sessionId}`);
+    ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/${sessionId}`);
 
     ws.onopen = () => {
       console.log('Connected');
@@ -873,6 +873,17 @@
 
       // Animate loop dots
       animateLoops(8);
+    }
+
+    else if (data.type === 'audio') {
+      const wavBytes = Uint8Array.from(atob(data.data), c => c.charCodeAt(0));
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      audioCtx.decodeAudioData(wavBytes.buffer, (buffer) => {
+        const src = audioCtx.createBufferSource();
+        src.buffer = buffer;
+        src.connect(audioCtx.destination);
+        src.start(0);
+      });
     }
 
     else if (data.type === 'error') {

@@ -15,6 +15,7 @@ import json
 import re
 import os
 import time
+import base64
 from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
@@ -367,9 +368,16 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                 "personality": personality,
             }))
 
-            # Speak
-            if voice and voice.enabled:
-                voice.speak(clean_final)
+            # Synthesize and send audio to browser
+            if voice and voice.enabled and clean_final:
+                audio_bytes = await loop.run_in_executor(
+                    None, lambda: voice.synthesize(clean_final)
+                )
+                if audio_bytes:
+                    await ws.send_text(json.dumps({
+                        "type" : "audio",
+                        "data" : base64.b64encode(audio_bytes).decode("utf-8"),
+                    }))
 
             # Update history
             history.append({"role": "assistant", "content": clean_final})
