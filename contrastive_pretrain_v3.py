@@ -375,12 +375,17 @@ class PairDataset(Dataset):
 # ─────────────────────────────────────────────────────────
 
 class StudentSimilarity(nn.Module):
-    def __init__(self, encoder: TokenEncoder):
+    def __init__(self, encoder: TokenEncoder, input_dim: int = 4096, d_model: int = 64):
         super().__init__()
+        self.proj    = nn.Linear(input_dim, d_model, bias=False)
         self.encoder = encoder
+        nn.init.xavier_uniform_(self.proj.weight)
 
     def encode_one(self, emb):
-        return self.encoder(emb.unsqueeze(1)).squeeze(1)
+        # emb: (B, 4096) → project → (B, d_model) → encoder → complex tokens
+        x = torch.relu(self.proj(emb))                    # (B, d_model)
+        x = x / x.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+        return self.encoder(x.unsqueeze(1)).squeeze(1)    # (B, d_model) complex
 
     def forward(self, a, b):
         ta   = self.encode_one(a)
@@ -389,7 +394,8 @@ class StudentSimilarity(nn.Module):
         mb   = tb.abs().float()
         dot  = (ma * mb).sum(dim=-1)
         norm = ma.norm(dim=-1).clamp(min=1e-8) * mb.norm(dim=-1).clamp(min=1e-8)
-        return dot / norm
+        sim  = dot / norm
+        return torch.nan_to_num(sim, nan=0.0)
 
 
 # ─────────────────────────────────────────────────────────
@@ -578,7 +584,7 @@ if __name__ == '__main__':
     registry = DomainRegistry(d_model=64, k_sparse=16)
     registry.register('qwen', input_dim=INPUT_DIM)
     registry.to(device)
-    student = StudentSimilarity(registry.encoders['qwen'])
+    student = StudentSimilarity(registry.encoders['qwen'], input_dim=INPUT_DIM, d_model=64)
     student.to(device)
     print(f"\nStudent parameters: {sum(p.numel() for p in student.parameters()):,}")
 
