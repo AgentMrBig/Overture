@@ -76,8 +76,8 @@ class Qwen3Embedder:
                 max_length      = 256,
                 padding         = True,
             ).to(self.model.device)
-            out    = self.model(**inputs, output_hidden_states=True)
-            hidden = out.hidden_states[-1]                          # (B, seq, 4096)
+            out    = self.model(**inputs)
+            hidden = out.last_hidden_state                          # (B, seq, 4096)
             mask   = inputs['attention_mask'].unsqueeze(-1).float()
             emb    = (hidden * mask).sum(1) / mask.sum(1).clamp(min=1e-8)  # (B, 4096)
             all_embs.append(emb.float().cpu())
