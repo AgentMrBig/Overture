@@ -82,7 +82,15 @@ class Qwen3Embedder:
             emb    = (hidden * mask).sum(1) / mask.sum(1).clamp(min=1e-8)  # (B, 4096)
             all_embs.append(emb.float().cpu())
         embs = torch.cat(all_embs, dim=0)
-        return embs / embs.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+        embs = torch.nan_to_num(embs, nan=0.0, posinf=1.0, neginf=-1.0)
+        norms = embs.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+        embs = embs / norms
+        # Drop any remaining NaN rows (zero vectors after normalization)
+        valid = ~torch.isnan(embs).any(dim=-1)
+        if not valid.all():
+            print(f"  Warning: dropped {(~valid).sum().item()} NaN embeddings")
+            embs = embs[valid]
+        return embs
 
 
 # ─────────────────────────────────────────────────────────
@@ -520,8 +528,11 @@ if __name__ == '__main__':
         corpus = build_corpus(target_size=TARGET_SIZE)
         print(f"\nEncoding with Qwen3-8B (batches of 16)...")
         t0   = time.perf_counter()
-        embs = embedder.encode(corpus, batch_size=16)
-        print(f"  Encoded {len(corpus):,} sentences in {time.perf_counter()-t0:.1f}s")
+        embs = embedder.encode(corpus, batch_size=32)
+        # Keep corpus in sync if any embeddings were dropped
+        if len(embs) != len(corpus):
+            corpus = corpus[:len(embs)]
+        print(f"  Encoded {len(embs):,} sentences in {time.perf_counter()-t0:.1f}s")
         torch.save({'embeddings': embs.cpu(), 'corpus': corpus}, cache_path)
         print(f"  Cached to {cache_path}")
 
