@@ -316,6 +316,7 @@ class PairDataset(Dataset):
 
         print(f"  Building similarity matrix ({n} x {n})...")
         E = self.embs.numpy()
+        E = np.nan_to_num(E, nan=0.0, posinf=1.0, neginf=-1.0)
         chunk = 500
         sim   = np.zeros((n, n), dtype=np.float32)
         for i in range(0, n, chunk):
@@ -323,6 +324,8 @@ class PairDataset(Dataset):
             for j in range(0, n, chunk):
                 ej = min(j + chunk, n)
                 sim[i:ei, j:ej] = E[i:ei] @ E[j:ej].T
+        sim = np.nan_to_num(sim, nan=0.0, posinf=1.0, neginf=-1.0)
+        sim = np.clip(sim, -1.0, 1.0)
 
         # Stratified sampling across similarity range
         weights      = [3, 2, 1, 1, 1, 1, 1, 1, 2, 3]
@@ -339,8 +342,11 @@ class PairDataset(Dataset):
                 continue
             if i > j:
                 i, j = j, i
-            s      = sim[i, j]
-            bucket = min(int(s * 10), 9)
+            s      = float(sim[i, j])
+            if np.isnan(s):
+                attempts += 1
+                continue
+            bucket = min(int((s + 1.0) * 5), 9)  # map [-1,1] → [0,9]
             if len(buckets[bucket]) < targets[bucket]:
                 buckets[bucket].append((i, j))
                 filled += 1
