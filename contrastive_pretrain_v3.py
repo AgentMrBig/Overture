@@ -63,10 +63,11 @@ class Qwen3Embedder:
         print(f"  Loaded in {time.perf_counter()-t0:.1f}s")
 
     @torch.no_grad()
-    def encode(self, texts: list, batch_size: int = 16) -> torch.Tensor:
+    def encode(self, texts: list, batch_size: int = 32) -> torch.Tensor:
         """Encode list of texts -> (N, 4096) normalized float tensor."""
+        from tqdm import tqdm
         all_embs = []
-        for i in range(0, len(texts), batch_size):
+        for i in tqdm(range(0, len(texts), batch_size), desc="  Encoding", unit="batch"):
             batch = texts[i: i + batch_size]
             inputs = self.tok(
                 batch,
@@ -289,11 +290,6 @@ def build_corpus(embedder=None, target_size: int = 5000) -> list:
             seen.add(s)
             corpus.append(s)
 
-    # Repeat to reach target size if needed
-    while len(corpus) < target_size and len(corpus) > 0:
-        corpus.extend(corpus[:target_size - len(corpus)])
-
-    corpus = corpus[:target_size]
     random.shuffle(corpus)
     print(f"  Corpus: {len(corpus):,} sentences from static seed list")
     return corpus
@@ -500,8 +496,8 @@ if __name__ == '__main__':
     if device.type == 'cuda':
         print(f"GPU: {torch.cuda.get_device_name(0)}")
 
-    TARGET_SIZE = 10000
-    N_PAIRS     = 20000
+    TARGET_SIZE = 500   # use unique seeds only — no repetition needed
+    N_PAIRS     = 5000
     BATCH_SIZE  = 256
     N_EPOCHS    = 60
     LR          = 2e-3
