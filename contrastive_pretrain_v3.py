@@ -88,7 +88,7 @@ class Qwen3Embedder:
 #  CORPUS BUILDER
 # ─────────────────────────────────────────────────────────
 
-def build_corpus(target_size: int = 20000) -> list:
+def build_corpus(target_size: int = 15000) -> list:
     from datasets import load_dataset
     corpus = []
     seen   = set()
@@ -102,12 +102,11 @@ def build_corpus(target_size: int = 20000) -> list:
         seen.add(s)
         corpus.append(s)
 
-    per = target_size // 5
+    # Only use reliably fast-streaming datasets
     sources = [
-        ('fancyzhx/ag_news',    'train', 'text',     per * 2, 2),
-        ('rajpurkar/squad',      'train', 'context',  per,     3),
-        ('dair-ai/emotion',      'train', 'text',     per,     1),
-        ('nyu-mll/multi_nli',    'train', 'premise',  per,     1),
+        ('fancyzhx/ag_news',  'train', 'text',    target_size,     2),
+        ('rajpurkar/squad',    'train', 'context', target_size // 2, 3),
+        ('dair-ai/emotion',    'train', 'text',    target_size // 3, 1),
     ]
 
     for ds_name, split, field, max_items, sents_per in sources:
@@ -115,7 +114,7 @@ def build_corpus(target_size: int = 20000) -> list:
             break
         print(f"  {ds_name}...", end='', flush=True)
         try:
-            ds = load_dataset(ds_name, split=split, streaming=True, trust_remote_code=True)
+            ds = load_dataset(ds_name, split=split, streaming=True)
             count = 0
             for item in ds:
                 text = item.get(field, '').replace('\\n', ' ').strip()
