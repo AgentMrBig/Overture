@@ -88,50 +88,66 @@ class Qwen3Embedder:
 #  CORPUS BUILDER
 # ─────────────────────────────────────────────────────────
 
-def build_corpus(target_size: int = 15000) -> list:
-    from datasets import load_dataset
-    corpus = []
-    seen   = set()
-
-    def add(s: str):
-        s = s.strip()
-        if len(s) < 20 or len(s) > 300 or s in seen:
-            return
-        if not any(c.isalpha() for c in s):
-            return
-        seen.add(s)
-        corpus.append(s)
-
-    # Only use reliably fast-streaming datasets
-    sources = [
-        ('fancyzhx/ag_news',  'train', 'text',    target_size,     2),
-        ('rajpurkar/squad',    'train', 'context', target_size // 2, 3),
-        ('dair-ai/emotion',    'train', 'text',    target_size // 3, 1),
+def build_corpus(embedder, target_size: int = 10000) -> list:
+    """Generate a diverse corpus using Qwen3-8B — no internet required."""
+    topics = [
+        "science and technology", "history and politics", "art and music",
+        "sports and fitness", "cooking and food", "travel and geography",
+        "business and economics", "philosophy and ethics", "nature and animals",
+        "medicine and health", "education and learning", "space and astronomy",
+        "psychology and behavior", "literature and writing", "engineering and design",
+        "mathematics and logic", "culture and society", "environment and climate",
+        "law and justice", "language and communication",
+    ]
+    prompts = [
+        "Write 20 diverse, factual sentences about {topic}. One sentence per line. No numbering.",
+        "Write 20 interesting statements or observations about {topic}. One per line.",
+        "Write 20 sentences that express different perspectives on {topic}. One per line.",
     ]
 
-    for ds_name, split, field, max_items, sents_per in sources:
+    corpus = []
+    seen   = set()
+    batch_inputs = []
+
+    print(f"  Generating corpus via Qwen3-8B ({target_size} sentences target)...")
+
+    # Build all prompt texts first
+    prompt_list = []
+    for topic in topics:
+        for p in prompts:
+            prompt_list.append(p.format(topic=topic))
+    random.shuffle(prompt_list)
+
+    for i, prompt_text in enumerate(prompt_list):
         if len(corpus) >= target_size:
             break
-        print(f"  {ds_name}...", end='', flush=True)
-        try:
-            ds = load_dataset(ds_name, split=split, streaming=True)
-            count = 0
-            for item in ds:
-                text = item.get(field, '').replace('\\n', ' ').strip()
-                if not text:
-                    continue
-                if sents_per == 1:
-                    add(text[:250])
-                else:
-                    for s in text.split('.')[:sents_per]:
-                        if len(s.strip()) > 25:
-                            add(s.strip() + '.')
-                count += 1
-                if count >= max_items or len(corpus) >= target_size:
-                    break
-            print(f" {len(corpus):,}")
-        except Exception as e:
-            print(f" failed: {e}")
+        # Format as chat
+        messages = [{"role": "user", "content": prompt_text}]
+        text = embedder.tok.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
+        )
+        inputs = embedder.tok(text, return_tensors="pt", truncation=True, max_length=256).to(embedder.model.device)
+        with torch.no_grad():
+            out = embedder.model.generate(
+                **inputs,
+                max_new_tokens=512,
+                do_sample=True,
+                temperature=0.8,
+                top_p=0.9,
+                pad_token_id=embedder.tok.eos_token_id,
+            )
+        generated = embedder.tok.decode(out[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
+        for line in generated.split('\n'):
+            s = line.strip().rstrip('.')
+            if len(s) < 20 or len(s) > 280:
+                continue
+            if not any(c.isalpha() for c in s):
+                continue
+            if s in seen:
+                continue
+            seen.add(s)
+            corpus.append(s)
+        print(f"  [{i+1}/{len(prompt_list)}] {len(corpus):,} sentences so far", flush=True)
 
     random.shuffle(corpus)
     corpus = corpus[:target_size]
@@ -340,8 +356,8 @@ if __name__ == '__main__':
     if device.type == 'cuda':
         print(f"GPU: {torch.cuda.get_device_name(0)}")
 
-    TARGET_SIZE = 20000
-    N_PAIRS     = 30000
+    TARGET_SIZE = 10000
+    N_PAIRS     = 20000
     BATCH_SIZE  = 256
     N_EPOCHS    = 60
     LR          = 2e-3
@@ -361,7 +377,7 @@ if __name__ == '__main__':
         print(f"  {len(corpus):,} sentences, shape {tuple(embs.shape)}")
     else:
         print(f"\nBuilding corpus ({TARGET_SIZE:,} sentences)...")
-        corpus = build_corpus(TARGET_SIZE)
+        corpus = build_corpus(embedder, TARGET_SIZE)
         print(f"\nEncoding with Qwen3-8B (batches of 16)...")
         t0   = time.perf_counter()
         embs = embedder.encode(corpus, batch_size=16)
