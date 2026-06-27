@@ -377,15 +377,12 @@ class PairDataset(Dataset):
 class StudentSimilarity(nn.Module):
     def __init__(self, encoder: TokenEncoder, input_dim: int = 4096, d_model: int = 64):
         super().__init__()
-        self.proj    = nn.Linear(input_dim, d_model, bias=False)
         self.encoder = encoder
-        nn.init.xavier_uniform_(self.proj.weight)
 
     def encode_one(self, emb):
-        # emb: (B, 4096) → project → (B, d_model) → encoder → complex tokens
-        x = torch.relu(self.proj(emb))                    # (B, d_model)
-        x = x / x.norm(dim=-1, keepdim=True).clamp(min=1e-8)
-        return self.encoder(x.unsqueeze(1)).squeeze(1)    # (B, d_model) complex
+        # emb: (B, 4096) — TokenEncoder already has DomainProjection(4096→64) inside
+        tokens = self.encoder(emb.unsqueeze(1))   # (B, 1, d_model) complex
+        return tokens.squeeze(1)                   # (B, d_model) complex
 
     def forward(self, a, b):
         ta   = self.encode_one(a)
