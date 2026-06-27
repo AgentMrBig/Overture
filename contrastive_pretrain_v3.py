@@ -367,7 +367,10 @@ class PairDataset(Dataset):
 
     def __getitem__(self, idx):
         i, j = self.pairs[idx]
-        return self.embs[i], self.embs[j], torch.tensor(self.sim[i, j], dtype=torch.float32)
+        # Normalize target from [-1,1] to [0,1] to match student magnitude-based similarity
+        target = float(self.sim[i, j])
+        target = (target + 1.0) / 2.0
+        return self.embs[i], self.embs[j], torch.tensor(target, dtype=torch.float32)
 
 
 # ─────────────────────────────────────────────────────────
@@ -596,8 +599,9 @@ if __name__ == '__main__':
         n_epochs=N_EPOCHS, lr=LR, target_corr=0.85,
     )
 
-    # Load best
-    registry.encoders['qwen'].load_state_dict(best_state)
+    # Load best (if training improved at all)
+    if best_state is not None:
+        registry.encoders['qwen'].load_state_dict(best_state)
 
     # Final eval
     final_corr = evaluate(student, embedder, val_sentences, device)
