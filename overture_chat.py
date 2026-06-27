@@ -126,7 +126,7 @@ SYSTEM_PROMPT = """Your name is Coda. You are the voice of Overture — a custom
 Overture is a multimodal Transformer frame with these properties:
 - Complex-valued sparse tokens (magnitude encodes presence, phase encodes relational position)
 - Weight-tied iterative core loop (same weights run N times, depth from iteration not parameters)
-- Qwen3-235B-A22B as the base model (235B total, 22B active via MoE routing)
+- Qwen3-8B as the base model for both embedding and chat
 - Only 633,216 trainable parameters in the frame itself
 - Weights are currently randomly initialized — semantic structure comes from Qwen3
 
@@ -205,7 +205,7 @@ BANNER = f"""
 {cyan('╔══════════════════════════════════════════════════════╗')}
 {cyan('║')}  {bold(cyan('CODA'))}  {gray('v0.2  voice of Overture')}                    {cyan('║')}
 {cyan('║')}  {dim('complex · sparse · iterative · domain-agnostic')}     {cyan('║')}
-{cyan('║')}  {dim('powered by Qwen3-235B-A22B + Kokoro TTS')}            {cyan('║')}
+{cyan('║')}  {dim('powered by Qwen3-8B + Kokoro TTS')}                  {cyan('║')}
 {cyan('╚══════════════════════════════════════════════════════╝')}
 """
 
@@ -214,12 +214,12 @@ BANNER = f"""
 #  QWEN3-4B CHAT MODEL
 # ─────────────────────────────────────────────────────────
 
-MODEL_NAME = "Qwen/Qwen3-235B-A22B"
+MODEL_NAME = "Qwen/Qwen3-8B"
 
 class ChatModel:
     """
-    Qwen3-235B-A22B (MoE, 22B active params) in 4-bit quantization.
-    Spread across 2x A100 80GB via device_map=auto.
+    Qwen3-8B in 4-bit quantization as the conversational layer.
+    Interprets user intent and generates natural responses.
     """
     def __init__(self, device):
         self.device    = device
@@ -227,7 +227,7 @@ class ChatModel:
         self.tokenizer = None
 
     def load(self):
-        print(f"  {dim('Loading Qwen3-235B-A22B (4-bit, dual A100)...')}", end='', flush=True)
+        print(f"  {dim('Loading Qwen3-8B (4-bit quantized)...')}", end='', flush=True)
         t0 = time.perf_counter()
 
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -237,7 +237,7 @@ class ChatModel:
 
         bnb_config = BitsAndBytesConfig(
             load_in_4bit              = True,
-            bnb_4bit_compute_dtype    = torch.bfloat16,
+            bnb_4bit_compute_dtype    = torch.float16,
             bnb_4bit_use_double_quant = True,
             bnb_4bit_quant_type       = "nf4",
         )
@@ -251,7 +251,7 @@ class ChatModel:
         )
 
         elapsed = time.perf_counter() - t0
-        print(f"\r  {green('Qwen3-235B-A22B loaded')} {gray(f'(4-bit, {elapsed:.1f}s)')}")
+        print(f"\r  {green('Qwen3-8B loaded')} {gray(f'(4-bit, {elapsed:.1f}s)')}")
 
     def get_embeddings(self, texts: list) -> "torch.Tensor":
         """Mean-pool last hidden states for use as embeddings. Returns (N, hidden_dim) normalized float tensor."""

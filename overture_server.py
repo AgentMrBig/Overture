@@ -36,7 +36,7 @@ PERSONALITIES = {
 Overture is a multimodal Transformer frame with these properties:
 - Complex-valued sparse tokens (magnitude encodes presence, phase encodes relational position)
 - Weight-tied iterative core loop (same weights run N times, depth from iteration not parameters)
-- Qwen3-235B-A22B as the base model (235B total, 22B active via MoE routing)
+- Qwen3-8B as the base model for both embedding and chat
 - Only 633,216 trainable parameters in the frame itself
 - Weights are currently randomly initialized — semantic structure comes from Qwen3
 
