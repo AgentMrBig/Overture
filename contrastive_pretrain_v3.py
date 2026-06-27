@@ -88,70 +88,214 @@ class Qwen3Embedder:
 #  CORPUS BUILDER
 # ─────────────────────────────────────────────────────────
 
-def build_corpus(embedder, target_size: int = 10000) -> list:
-    """Generate a diverse corpus using Qwen3-8B — no internet required."""
-    topics = [
-        "science and technology", "history and politics", "art and music",
-        "sports and fitness", "cooking and food", "travel and geography",
-        "business and economics", "philosophy and ethics", "nature and animals",
-        "medicine and health", "education and learning", "space and astronomy",
-        "psychology and behavior", "literature and writing", "engineering and design",
-        "mathematics and logic", "culture and society", "environment and climate",
-        "law and justice", "language and communication",
-    ]
-    prompts = [
-        "Write 20 diverse, factual sentences about {topic}. One sentence per line. No numbering.",
-        "Write 20 interesting statements or observations about {topic}. One per line.",
-        "Write 20 sentences that express different perspectives on {topic}. One per line.",
+def build_corpus(embedder=None, target_size: int = 5000) -> list:
+    """Static diverse corpus — no network, no generation needed."""
+    seeds = [
+        # Science & Technology
+        "Quantum computers exploit superposition and entanglement to solve problems classical computers cannot.",
+        "CRISPR-Cas9 allows precise editing of DNA sequences in living organisms.",
+        "Machine learning models learn patterns from data without being explicitly programmed.",
+        "The internet was originally designed as a decentralized communication network for resilience.",
+        "Fusion energy promises nearly limitless clean power if containment can be sustained.",
+        "Transistors shrank from centimeters to nanometers over seven decades of Moore's Law.",
+        "Neural networks are loosely inspired by the structure of biological brains.",
+        "Blockchain creates tamper-resistant records through distributed consensus mechanisms.",
+        "Satellites in low Earth orbit now provide global broadband internet coverage.",
+        "Autonomous vehicles must balance safety, speed, and ethical decision-making in real time.",
+        "Large language models predict the next token based on context learned from vast text corpora.",
+        "Robotics combines mechanical engineering, electronics, and software to automate physical tasks.",
+        "Photovoltaic cells convert sunlight directly into electricity through the photoelectric effect.",
+        "5G networks offer dramatically higher bandwidth and lower latency than previous generations.",
+        "Cryptography protects digital communications using mathematical problems hard to reverse.",
+        # Nature & Environment
+        "Rainforests cover only six percent of Earth's surface but house over half of all species.",
+        "Coral reefs support enormous biodiversity despite occupying a small fraction of the ocean floor.",
+        "Climate change is shifting the geographic ranges of plant and animal species worldwide.",
+        "Wolves reintroduced to Yellowstone triggered a cascade of ecological changes across the park.",
+        "Bees pollinate roughly one third of the food crops humans depend on globally.",
+        "Ocean acidification threatens shell-forming marine life as CO2 dissolves into seawater.",
+        "Migratory birds navigate using magnetic fields, star patterns, and learned landmarks.",
+        "Forests sequester carbon, regulate water cycles, and stabilize soil simultaneously.",
+        "Deep-sea hydrothermal vents host ecosystems that thrive without sunlight.",
+        "Wildfires, though destructive, are a natural part of many ecosystems' renewal cycles.",
+        "The Amazon River discharges more freshwater into the ocean than any other river on Earth.",
+        "Permafrost holds vast amounts of carbon that could accelerate warming if it thaws.",
+        "Mangrove forests protect coastlines from storm surges and provide nurseries for fish.",
+        "Soil microbiomes play crucial roles in nutrient cycling and plant health.",
+        "The monarch butterfly migrates thousands of miles between Mexico and North America annually.",
+        # History & Society
+        "The printing press democratized knowledge by making books affordable and widely available.",
+        "Industrialization transformed rural agrarian societies into urban manufacturing economies.",
+        "The Cold War shaped geopolitics for decades through ideological competition and proxy conflicts.",
+        "Ancient trade routes spread not just goods but also ideas, religions, and diseases.",
+        "Democracy in Athens was limited to free male citizens, excluding women and slaves.",
+        "The Scientific Revolution challenged centuries of religious authority over natural knowledge.",
+        "Colonialism extracted wealth from subjugated peoples and reshaped global power dynamics.",
+        "The French Revolution introduced concepts of liberty and popular sovereignty to Europe.",
+        "World War II killed an estimated seventy to eighty-five million people worldwide.",
+        "The civil rights movement used nonviolent protest to challenge institutionalized racial segregation.",
+        "Urbanization has concentrated over half of humanity in cities for the first time in history.",
+        "The Green Revolution dramatically increased agricultural yields in the twentieth century.",
+        "Globalization has deepened economic interdependence while also creating new inequalities.",
+        "Empires throughout history rose through military conquest and fell through overextension.",
+        "Writing systems allowed complex societies to keep records, pass laws, and coordinate at scale.",
+        # Health & Medicine
+        "Vaccines work by training the immune system to recognize pathogens without causing disease.",
+        "Antibiotics revolutionized medicine by making previously fatal bacterial infections treatable.",
+        "The human gut microbiome influences immune function, mood, and metabolic health.",
+        "Cancer arises when cells accumulate mutations that override normal growth controls.",
+        "Mental health conditions are as real and debilitating as physical illnesses.",
+        "Regular physical exercise reduces risk of cardiovascular disease, diabetes, and depression.",
+        "Sleep deprivation impairs cognition, emotional regulation, and immune function.",
+        "Nutrition shapes long-term health outcomes more than most other lifestyle factors.",
+        "Gene therapy holds promise for treating inherited disorders by correcting faulty DNA.",
+        "The placebo effect demonstrates how expectation and belief influence physical outcomes.",
+        "Chronic stress elevates cortisol levels and accelerates cellular aging.",
+        "Early diagnosis dramatically improves survival rates for most cancers.",
+        "Telemedicine expanded access to healthcare for patients in remote and underserved areas.",
+        "Organ transplantation requires lifelong immunosuppression to prevent rejection.",
+        "Public health measures like clean water and sanitation saved more lives than most drugs.",
+        # Philosophy & Ethics
+        "Utilitarianism judges actions by the greatest happiness produced for the greatest number.",
+        "Kant argued morality requires treating people as ends in themselves, never merely as means.",
+        "Free will and determinism remain unresolved tensions in philosophy and neuroscience.",
+        "Existentialism holds that individuals must create their own meaning in an indifferent universe.",
+        "Justice requires both fairness in process and equity in outcomes.",
+        "The trolley problem illustrates conflicts between consequentialist and deontological ethics.",
+        "Plato believed knowledge of abstract Forms was more real than sensory experience.",
+        "Stoicism teaches that virtue is the only true good and external events are beyond our control.",
+        "Ethics of care prioritizes relationships and context over universal abstract principles.",
+        "Moral relativism holds that ethical standards vary across cultures and periods.",
+        "The nature of consciousness remains one of philosophy's most intractable problems.",
+        "Political philosophy asks what justifies the authority of states over individuals.",
+        "Rights-based ethics grounds morality in inalienable entitlements all humans possess.",
+        "Nihilism denies any objective basis for meaning, value, or morality.",
+        "Pragmatism evaluates ideas by their practical consequences rather than abstract truth.",
+        # Economics & Business
+        "Supply and demand determine prices in competitive markets through decentralized coordination.",
+        "Inflation erodes purchasing power when the money supply grows faster than output.",
+        "Startups disrupt incumbent industries by solving old problems with cheaper or better approaches.",
+        "Network effects make platforms more valuable as more users join them.",
+        "Behavioral economics shows humans systematically deviate from rational choice predictions.",
+        "Compound interest rewards patient investors and punishes persistent borrowers.",
+        "Trade deficits and surpluses reflect differences in savings rates and investment needs.",
+        "Monopolies reduce consumer welfare by restricting output and raising prices.",
+        "Automation displaces some jobs while creating demand for new kinds of work.",
+        "Central banks use interest rates to balance inflation and unemployment objectives.",
+        "Venture capital funds risky early-stage companies in exchange for equity stakes.",
+        "Brand loyalty reduces price sensitivity and provides durable competitive advantages.",
+        "Income inequality has risen in most developed economies since the 1980s.",
+        "Microfinance extends small loans to entrepreneurs in developing countries.",
+        "The gig economy offers flexibility but reduces worker protections and benefits.",
+        # Psychology & Behavior
+        "Cognitive biases cause systematic errors in judgment that are difficult to correct.",
+        "Attachment styles formed in childhood influence relationship patterns throughout life.",
+        "The bystander effect makes individuals less likely to help when others are present.",
+        "Intrinsic motivation produces deeper engagement and creativity than external rewards.",
+        "Habituation causes us to notice changes in our environment more than stable features.",
+        "Confirmation bias leads people to seek information that supports existing beliefs.",
+        "Emotions evolved as rapid signals to guide behavior in uncertain environments.",
+        "Long-term memory is reconstructive, not reproductive — we rebuild rather than replay.",
+        "Social identity shapes self-concept through group membership and comparison.",
+        "Stress can enhance performance up to a threshold, beyond which it impairs it.",
+        "Humans overestimate how much future events will affect their long-term happiness.",
+        "Mirror neurons may underlie our ability to understand and imitate others' actions.",
+        "Flow states arise when skill and challenge are in balance, producing deep absorption.",
+        "Sleep consolidates memories by replaying neural patterns formed during waking hours.",
+        "Growth mindset predicts academic achievement better than raw measured intelligence.",
+        # Art, Culture & Language
+        "Language shapes thought by structuring which distinctions are easy or hard to make.",
+        "Music evokes emotion through expectation, tension, and resolution across cultures.",
+        "Art serves as a mirror of society, reflecting its values, anxieties, and aspirations.",
+        "Storytelling is one of humanity's oldest and most universal forms of communication.",
+        "Architecture shapes behavior by determining how people move through and occupy space.",
+        "Languages with more speakers tend to simplify their grammar over generations.",
+        "Film editing creates meaning through juxtaposition that neither shot alone contains.",
+        "Humor often works by violating expectations in a benign, non-threatening way.",
+        "Cultural heritage preservation balances authenticity against accessibility and change.",
+        "Translation is interpretation — no two languages map concepts onto the world identically.",
+        "Improvisation in jazz requires internalizing rules deeply enough to break them creatively.",
+        "Literary metaphors restructure how we understand abstract concepts.",
+        "Dance is one of the few art forms that uses the human body as its primary medium.",
+        "Typography influences how readers feel about content before they process its meaning.",
+        "Oral traditions preserved complex knowledge across generations before writing existed.",
+        # Space & Astronomy
+        "The observable universe contains more stars than grains of sand on all Earth's beaches.",
+        "Black holes warp spacetime so severely that not even light can escape their event horizon.",
+        "The Big Bang did not occur at a point in space but was an expansion of space itself.",
+        "Exoplanet detection has revealed that planetary systems are common throughout the galaxy.",
+        "Dark matter outweighs ordinary matter five to one but has never been directly observed.",
+        "Light from distant galaxies shows us the universe as it existed billions of years ago.",
+        "Mars once had liquid water on its surface and may have harbored microbial life.",
+        "Neutron stars pack more mass than the sun into a sphere the size of a city.",
+        "Cosmic rays are high-energy particles that constantly bombard Earth from deep space.",
+        "Gravitational waves ripple through spacetime when massive objects accelerate.",
+        "The Voyager probes, launched in 1977, have now crossed into interstellar space.",
+        "Jupiter's magnetic field is the largest structure in the solar system after the sun.",
+        "Saturn's rings are primarily water ice and are remarkably thin relative to their width.",
+        "The search for extraterrestrial intelligence scans radio frequencies for artificial signals.",
+        "Stellar nucleosynthesis forged every element heavier than hydrogen and helium inside stars.",
+        # Mathematics & Logic
+        "Prime numbers have no factors other than one and themselves and are infinitely numerous.",
+        "Gödel proved that any sufficiently powerful formal system contains true but unprovable statements.",
+        "Probability theory quantifies uncertainty and underlies statistics, physics, and finance.",
+        "Topology studies properties preserved under continuous deformation without tearing or gluing.",
+        "The Pythagorean theorem relates the sides of right triangles in all Euclidean geometries.",
+        "Chaos theory shows that tiny differences in initial conditions can lead to vastly different outcomes.",
+        "Graph theory models networks of relationships and has applications across many fields.",
+        "Infinity comes in different sizes — the real numbers are strictly more numerous than the integers.",
+        "Bayesian reasoning updates probabilities as new evidence arrives.",
+        "Linear algebra underlies computer graphics, machine learning, and quantum mechanics.",
+        "Mathematical proof establishes certainty by deriving conclusions from axioms through logic.",
+        "Fractals exhibit self-similarity at every scale, arising from simple iterative rules.",
+        "Game theory analyzes strategic interactions where outcomes depend on multiple agents' choices.",
+        "Complex numbers extend the real line into a plane and are essential in physics and engineering.",
+        "The halting problem proves some questions are undecidable by any algorithm.",
+        # Engineering & Design
+        "Good design solves a problem simply while remaining intuitive for the intended user.",
+        "Structural engineering must balance strength, weight, material cost, and aesthetic goals.",
+        "Iterative prototyping reveals problems early when changes are still cheap to make.",
+        "Redundancy in critical systems prevents single points of failure from causing catastrophe.",
+        "User experience design centers on how people actually behave, not how designers expect them to.",
+        "Civil engineering transformed cities by providing clean water, sewage, and reliable roads.",
+        "The design of everyday objects encodes assumptions about who will use them and how.",
+        "Feedback loops in control systems allow machines to self-correct toward desired states.",
+        "Material science discovers new substances with properties tailored for specific applications.",
+        "Sustainable engineering considers the full lifecycle environmental impact of designs.",
+        "Elegant solutions in engineering often use fewer components to achieve the same function.",
+        "Biomimicry applies principles from nature to solve human engineering challenges.",
+        "Signal processing extracts useful information from noise in communications and sensors.",
+        "Software architecture decisions made early constrain what is possible years later.",
+        "Human factors engineering designs technology to match human cognitive and physical limits.",
     ]
 
+    # Expand with paraphrases and variations by shuffling subsets
+    expanded = list(seeds)
+    # Add negations, questions, and partial variants for diversity
+    extras = []
+    for s in seeds[:100]:
+        words = s.split()
+        if len(words) > 8:
+            extras.append(' '.join(words[:len(words)//2]) + '.')
+    expanded.extend(extras)
+
+    random.shuffle(expanded)
+    # Deduplicate
+    seen = set()
     corpus = []
-    seen   = set()
-    batch_inputs = []
-
-    print(f"  Generating corpus via Qwen3-8B ({target_size} sentences target)...")
-
-    # Build all prompt texts first
-    prompt_list = []
-    for topic in topics:
-        for p in prompts:
-            prompt_list.append(p.format(topic=topic))
-    random.shuffle(prompt_list)
-
-    for i, prompt_text in enumerate(prompt_list):
-        if len(corpus) >= target_size:
-            break
-        # Format as chat
-        messages = [{"role": "user", "content": prompt_text}]
-        text = embedder.tok.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
-        )
-        inputs = embedder.tok(text, return_tensors="pt", truncation=True, max_length=256).to(embedder.model.device)
-        with torch.no_grad():
-            out = embedder.model.generate(
-                **inputs,
-                max_new_tokens=512,
-                do_sample=True,
-                temperature=0.8,
-                top_p=0.9,
-                pad_token_id=embedder.tok.eos_token_id,
-            )
-        generated = embedder.tok.decode(out[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
-        for line in generated.split('\n'):
-            s = line.strip().rstrip('.')
-            if len(s) < 20 or len(s) > 280:
-                continue
-            if not any(c.isalpha() for c in s):
-                continue
-            if s in seen:
-                continue
+    for s in expanded:
+        s = s.strip()
+        if s not in seen and len(s) >= 20:
             seen.add(s)
             corpus.append(s)
-        print(f"  [{i+1}/{len(prompt_list)}] {len(corpus):,} sentences so far", flush=True)
 
-    random.shuffle(corpus)
+    # Repeat to reach target size if needed
+    while len(corpus) < target_size and len(corpus) > 0:
+        corpus.extend(corpus[:target_size - len(corpus)])
+
     corpus = corpus[:target_size]
-    print(f"  Corpus: {len(corpus):,} sentences")
+    random.shuffle(corpus)
+    print(f"  Corpus: {len(corpus):,} sentences from static seed list")
     return corpus
 
 
@@ -377,7 +521,7 @@ if __name__ == '__main__':
         print(f"  {len(corpus):,} sentences, shape {tuple(embs.shape)}")
     else:
         print(f"\nBuilding corpus ({TARGET_SIZE:,} sentences)...")
-        corpus = build_corpus(embedder, TARGET_SIZE)
+        corpus = build_corpus(target_size=TARGET_SIZE)
         print(f"\nEncoding with Qwen3-8B (batches of 16)...")
         t0   = time.perf_counter()
         embs = embedder.encode(corpus, batch_size=16)
