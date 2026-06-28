@@ -329,15 +329,21 @@ async def websocket_chat(ws: WebSocket, session_id: str):
             if personality == "resonant" and frame is not None:
                 try:
                     await ws.send_text(json.dumps({"type": "running_frame"}))
-                    # Extract key words/concepts from user input for frame analysis
-                    words = [w.strip('.,?!') for w in user_input.split() if len(w.strip('.,?!')) > 3]
+                    # Filter stop words to get meaningful concepts only
+                    stop = {'what','is','the','are','of','in','a','an','and','or',
+                            'how','why','who','where','when','does','do','can','tell',
+                            'me','us','you','your','their','its','this','that','these',
+                            'those','with','for','to','from','about','between','into'}
+                    concepts = [w.strip('.,?!:;') for w in user_input.split()
+                                if len(w.strip('.,?!:;')) > 2
+                                and w.strip('.,?!:;').lower() not in stop]
                     frame_data_lines = []
                     # Encode the full input
                     enc_result = execute_command({"action": "encode", "args": [user_input]}, frame)
                     frame_data_lines.append(enc_result)
-                    # If 2+ meaningful words, run similarity on first two concepts
-                    if len(words) >= 2:
-                        sim_result = execute_command({"action": "similarity", "args": [words[0], words[-1]]}, frame)
+                    # Run similarity on the two most meaningful concepts
+                    if len(concepts) >= 2:
+                        sim_result = execute_command({"action": "similarity", "args": [concepts[0], concepts[1]]}, frame)
                         frame_data_lines.append(sim_result)
                     frame_debug = "\n".join(frame_data_lines)
                     results.append(frame_debug)
