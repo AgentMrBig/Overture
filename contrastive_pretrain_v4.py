@@ -401,6 +401,7 @@ class StudentSimilarity(nn.Module):
 # ─────────────────────────────────────────────────────────
 
 class CombinedLoss(nn.Module):
+    """MSE regression loss — kept for compatibility but replaced by InfoNCE in training loop."""
     def __init__(self):
         super().__init__()
         self.mse = nn.MSELoss()
@@ -412,6 +413,23 @@ class CombinedLoss(nn.Module):
         neg_loss = (torch.clamp(pred - 0.25 + 0.25, min=0) * neg_mask).mean()
         pos_loss = (torch.clamp(0.75 - pred + 0.25, min=0) * pos_mask).mean()
         return mse_loss + 0.8 * (neg_loss + pos_loss), mse_loss, neg_loss + pos_loss
+
+
+def infonce_loss(za: torch.Tensor, zb: torch.Tensor, temperature: float = 0.07):
+    """
+    InfoNCE / NT-Xent loss over a batch of (anchor, positive) pairs.
+    za, zb: (B, d_model) unit-normalized embeddings.
+    Treats each item in the batch as a negative for all others.
+    This directly trains ranking geometry — same loss as CLIP/SimCLR.
+    """
+    B = za.shape[0]
+    # Full (B, B) similarity matrix
+    sim = (za @ zb.T) / temperature          # (B, B)
+    labels = torch.arange(B, device=za.device)
+    # Cross-entropy: each row's correct positive is on the diagonal
+    loss_az = torch.nn.functional.cross_entropy(sim, labels)
+    loss_bz = torch.nn.functional.cross_entropy(sim.T, labels)
+    return (loss_az + loss_bz) / 2
 
 
 # ─────────────────────────────────────────────────────────
@@ -444,42 +462,38 @@ def evaluate(student, embedder, sentences, device):
 # ─────────────────────────────────────────────────────────
 
 def train(student, loader, val_sentences, embedder, device,
-          n_epochs=60, lr=2e-3, target_corr=0.85):
+          n_epochs=100, lr=3e-3, target_corr=0.85, temperature=0.07):
 
     optimizer = optim.AdamW(student.parameters(), lr=lr, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.CyclicLR(
-        optimizer, base_lr=lr * 0.01, max_lr=lr,
-        step_size_up=len(loader) * 2, mode='triangular2', cycle_momentum=False,
-    )
-    criterion = CombinedLoss()
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_epochs)
 
     print(f"\n{'═'*66}")
     print(f"  Contrastive Pre-training v4 — BGE-small-en-v1.5 teacher")
-    print(f"  Target: >{target_corr:.0%} correlation  |  Max epochs: {n_epochs}")
+    print(f"  Loss: InfoNCE (τ={temperature})  |  Target: >{target_corr:.0%} corr  |  Epochs: {n_epochs}")
     print(f"{'═'*66}")
-    print(f"  {'Ep':>4}  {'Loss':>10}  {'MSE':>8}  {'Margin':>8}  {'Corr':>8}  {'Time':>6}")
-    print(f"  {'─'*56}")
+    print(f"  {'Ep':>4}  {'Loss':>10}  {'Corr':>8}  {'Time':>6}")
+    print(f"  {'─'*36}")
 
     best_corr, best_state = 0.0, None
     t_start = time.perf_counter()
 
     for epoch in range(1, n_epochs + 1):
         t_ep = time.perf_counter()
-        total_l, mse_l, margin_l = [], [], []
+        student.train()
+        total_l = []
 
-        for a, b, target in loader:
-            a, b, target = a.to(device), b.to(device), target.to(device)
+        for a, b, _ in loader:   # ignore MSE targets — InfoNCE uses batch negatives
+            a, b = a.to(device), b.to(device)
             optimizer.zero_grad()
-            pred = student(a, b)
-            loss, mse, margin = criterion(pred, target)
+            za = student.encode_one(a)
+            zb = student.encode_one(b)
+            loss = infonce_loss(za, zb, temperature)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(student.parameters(), 1.0)
             optimizer.step()
-            scheduler.step()
             total_l.append(loss.item())
-            mse_l.append(mse.item())
-            margin_l.append(margin.item())
 
+        scheduler.step()
         elapsed = time.perf_counter() - t_ep
 
         if epoch % 2 == 0 or epoch == 1:
@@ -488,16 +502,14 @@ def train(student, loader, val_sentences, embedder, device,
             if corr > best_corr:
                 best_corr  = corr
                 best_state = {k: v.clone() for k, v in student.state_dict().items()}
-            print(f"  {epoch:>4}  {np.mean(total_l):>10.6f}  {np.mean(mse_l):>8.6f}  "
-                  f"{np.mean(margin_l):>8.6f}  {corr:>8.4f}  {elapsed:>5.1f}s {star}")
+            print(f"  {epoch:>4}  {np.mean(total_l):>10.6f}  {corr:>8.4f}  {elapsed:>5.1f}s {star}")
             if corr >= target_corr:
                 print(f"\n  Target {target_corr:.0%} reached at epoch {epoch}!")
                 break
         else:
-            print(f"  {epoch:>4}  {np.mean(total_l):>10.6f}  {np.mean(mse_l):>8.6f}  "
-                  f"{np.mean(margin_l):>8.6f}  {'─':>8}  {elapsed:>5.1f}s")
+            print(f"  {epoch:>4}  {np.mean(total_l):>10.6f}  {'─':>8}  {elapsed:>5.1f}s")
 
-    print(f"  {'─'*56}")
+    print(f"  {'─'*36}")
     print(f"  Best corr : {best_corr:.4f}  |  Time: {(time.perf_counter()-t_start)/60:.1f} min")
     print(f"{'═'*66}\n")
     return best_corr, best_state
