@@ -341,10 +341,14 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                     # Encode the full input
                     enc_result = execute_command({"action": "encode", "args": [user_input]}, frame)
                     frame_data_lines.append(enc_result)
-                    # Run similarity on the two most meaningful concepts
+                    # Run similarity — prefer trained BGE student if available
                     if len(concepts) >= 2:
-                        sim_result = execute_command({"action": "similarity", "args": [concepts[0], concepts[1]]}, frame)
-                        frame_data_lines.append(sim_result)
+                        stu_sim = frame.student_sim(concepts[0], concepts[1])
+                        if stu_sim is not None:
+                            frame_data_lines.append(f"student_sim({concepts[0]}, {concepts[1]}) = {stu_sim:.4f}  [BGE-trained]")
+                        else:
+                            sim_result = execute_command({"action": "similarity", "args": [concepts[0], concepts[1]]}, frame)
+                            frame_data_lines.append(sim_result)
                     frame_debug = "\n".join(frame_data_lines)
                     results.append(frame_debug)
                     # Re-run with frame context injected before generation

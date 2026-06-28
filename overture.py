@@ -95,6 +95,8 @@ class OvertureFrame:
         self.qwen          = None
         self.registry      = None
         self.core          = None
+        self.bge_embedder  = None   # BGE teacher (optional, loaded from checkpoint)
+        self.bge_student   = None   # pretrained similarity student
         # If using shared model, derive dim from it; else default 64 for SentenceTransformer
         if truncate_dim is not None:
             self.truncate_dim = truncate_dim
@@ -141,6 +143,23 @@ class OvertureFrame:
             sum(p.numel() for p in self.core.parameters())
         )
         print(f"\r  {green('Frame ready')} {gray(f'({total_params:,} params)')}")
+
+        # Load pretrained BGE student if checkpoint exists
+        import os
+        ckpt_path = os.path.join(os.path.dirname(__file__), 'qwen_encoder_pretrained.pt')
+        if os.path.exists(ckpt_path):
+            try:
+                from contrastive_pretrain_v4 import StudentSimilarity, BGEEmbedder
+                ckpt = torch.load(ckpt_path, map_location=self.device, weights_only=False)
+                input_dim = ckpt.get('input_dim', 384)
+                self.bge_student = StudentSimilarity(input_dim=input_dim, d_model=self.d_model).to(self.device)
+                self.bge_student.load_state_dict(ckpt['encoder_state'])
+                self.bge_student.eval()
+                self.bge_embedder = BGEEmbedder(self.device)
+                self.bge_embedder.load()
+                print(f"  {green('BGE student loaded')} {gray(f'(corr={ckpt.get(\"final_corr\", 0):.3f})')}")
+            except Exception as e:
+                print(f"  {gray(f'BGE student not loaded: {e}')}")
 
     def _qwen_encode(self, inputs):
         """Encode text inputs using shared model or standalone SentenceTransformer."""
@@ -199,6 +218,17 @@ class OvertureFrame:
         a = a.float().flatten()
         b = b.float().flatten()
         return (a @ b / (a.norm() * b.norm() + 1e-8)).item()
+
+    def student_sim(self, text_a: str, text_b: str) -> float:
+        """Cosine similarity using pretrained BGE student. Falls back to complex_sim."""
+        if self.bge_student is None or self.bge_embedder is None:
+            return None
+        with torch.no_grad():
+            ea = self.bge_embedder.encode([text_a]).to(self.device)
+            eb = self.bge_embedder.encode([text_b]).to(self.device)
+            za = self.bge_student.encode_one(ea)[0]
+            zb = self.bge_student.encode_one(eb)[0]
+            return (za @ zb).item()
 
 
 # ─────────────────────────────────────────────────────────
