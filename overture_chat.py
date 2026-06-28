@@ -242,12 +242,13 @@ class ChatModel:
             bnb_4bit_quant_type       = "nf4",
         )
 
+        torch.cuda.init()
         self.model = AutoModelForCausalLM.from_pretrained(
             MODEL_NAME,
             quantization_config = bnb_config,
             device_map          = "auto",
             trust_remote_code   = True,
-            max_memory          = {0: "75GiB", 1: "75GiB", "cpu": "40GiB"},
+            max_memory          = {0: "14GiB", "cpu": "20GiB"},
         )
 
         elapsed = time.perf_counter() - t0
