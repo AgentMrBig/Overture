@@ -826,6 +826,15 @@
       updateDeltaChart(data.results);
       cmdCount++;
       document.getElementById('s-cmds').textContent = cmdCount;
+
+      // Parse encode result string to update left panel stats (persist until next query)
+      const encodeText = (data.results || []).join('\n');
+      const magMatch    = encodeText.match(/Mean magnitude:\s*([\d.]+)/);
+      const phaseMatch  = encodeText.match(/Phase std:\s*([\d.]+)/);
+      const activeMatch = encodeText.match(/Active dims:\s*(\d+\/\d+)/);
+      if (magMatch)    document.getElementById('s-mag').textContent    = parseFloat(magMatch[1]).toFixed(4);
+      if (phaseMatch)  document.getElementById('s-phase').textContent  = phaseMatch[1] + 'r';
+      if (activeMatch) document.getElementById('s-active').textContent = activeMatch[1];
     }
 
     else if (data.type === 'thinking_block') {
@@ -1089,21 +1098,29 @@
 
   function updateDeltaChart(results) {
     const chart = document.getElementById('delta-chart');
-    // Extract deltas from result text if present
     const deltaMatch = results.join('\n').match(/delta[s]?[\s:=]+([\d., ]+)/i);
     if (deltaMatch) {
       const deltas = deltaMatch[1].split(/[,\s]+/)
         .map(parseFloat).filter(n => !isNaN(n));
       if (deltas.length > 0) {
         const max = Math.max(...deltas);
+        // Find convergence point (first index where delta < 0.05)
+        let convergedAt = deltas.findIndex(d => d < 0.05);
+        if (convergedAt === -1) convergedAt = deltas.length;
         chart.innerHTML = deltas.map((d, i) => {
           const h = max > 0 ? (d / max * 50) : 4;
-          const color = d < 0.1
-            ? 'var(--green)'
-            : d < 0.3
-            ? 'var(--cyan)'
-            : 'var(--purple)';
-          return `<div class="delta-bar" style="height:${h}px;background:${color}"></div>`;
+          let color;
+          if (i >= convergedAt) {
+            color = 'var(--muted, #444)';  // grey after convergence
+          } else if (d < 0.1) {
+            color = 'var(--green)';
+          } else if (d < 0.3) {
+            color = 'var(--cyan)';
+          } else {
+            color = 'var(--purple)';
+          }
+          const title = i >= convergedAt ? `Loop ${i+1} (converged)` : `Loop ${i+1}: Δ${d.toFixed(3)}`;
+          return `<div class="delta-bar" title="${title}" style="height:${h}px;background:${color}"></div>`;
         }).join('');
       }
     }

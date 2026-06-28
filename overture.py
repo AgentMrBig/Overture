@@ -134,7 +134,7 @@ class OvertureFrame:
             d_model       = self.d_model,
             n_heads       = 4,
             ff_multiplier = 4,
-            max_loops     = 32,
+            max_loops     = 16,
         )
         self.core.to(self.device).eval()
 
