@@ -311,7 +311,7 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                 None, lambda: chat.generate(messages, max_new_tokens=1000)
             )
 
-            # Only run frame commands for prime personality
+            # Run frame commands for prime personality
             commands = []
             results  = []
             if personality == "prime":
@@ -323,8 +323,33 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                     result = execute_command(cmd, frame)
                     results.append(result)
 
-            # Second pass if commands ran
-            if results:
+            # For resonant: auto-run frame similarity on user input and inject as context
+            frame_debug = ""
+            if personality == "resonant" and frame is not None:
+                try:
+                    await ws.send_text(json.dumps({"type": "running_frame"}))
+                    # Extract key words/concepts from user input for frame analysis
+                    words = [w.strip('.,?!') for w in user_input.split() if len(w.strip('.,?!')) > 3]
+                    frame_data_lines = []
+                    # Encode the full input
+                    enc_result = execute_command({"action": "encode", "args": [user_input]}, frame)
+                    frame_data_lines.append(enc_result)
+                    # If 2+ meaningful words, run similarity on first two concepts
+                    if len(words) >= 2:
+                        sim_result = execute_command({"action": "similarity", "args": [words[0], words[-1]]}, frame)
+                        frame_data_lines.append(sim_result)
+                    frame_debug = "\n".join(frame_data_lines)
+                    results.append(frame_debug)
+                    # Re-run with frame context injected before generation
+                    frame_messages = [{"role": "system", "content": system_prompt + f"\n\n[Frame data — briefly cite key numbers at start of response e.g. 'Frame: sim=0.823']: {frame_debug}"}] + history
+                    raw_response = await loop.run_in_executor(
+                        None, lambda: chat.generate(frame_messages, max_new_tokens=600)
+                    )
+                except Exception as e:
+                    print(f"  Resonant frame error: {e}")
+
+            # Second pass if commands ran (prime only)
+            if results and personality == "prime":
                 results_text = '\n\n'.join(results)
                 follow_up = messages + [
                     {"role": "assistant", "content": raw_response},
