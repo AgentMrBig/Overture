@@ -300,11 +300,9 @@ class ChatModel:
                 eos_token_id    = self.tokenizer.eos_token_id,
             )
 
-        # Decode only the new tokens
+        # Decode only the new tokens — keep think blocks so server can extract them
         new_tokens = output[0][inputs['input_ids'].shape[1]:]
-        response = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
-        # Strip <think>...</think> blocks
-        response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
+        response = self.tokenizer.decode(new_tokens, skip_special_tokens=False).strip()
         return response
 
 

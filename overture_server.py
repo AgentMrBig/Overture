@@ -306,9 +306,10 @@ async def websocket_chat(ws: WebSocket, session_id: str):
             t0   = time.perf_counter()
             loop = asyncio.get_event_loop()
 
-            # First pass
+            # First pass — resonant gets more tokens to think + respond
+            token_budget = 2500 if personality == "resonant" else 1000
             raw_response = await loop.run_in_executor(
-                None, lambda: chat.generate(messages, max_new_tokens=1000)
+                None, lambda: chat.generate(messages, max_new_tokens=token_budget)
             )
 
             # Run frame commands for prime personality
@@ -343,7 +344,7 @@ async def websocket_chat(ws: WebSocket, session_id: str):
                     # Re-run with frame context injected before generation
                     frame_messages = [{"role": "system", "content": system_prompt + f"\n\n[Frame data — briefly cite key numbers at start of response e.g. 'Frame: sim=0.823']: {frame_debug}"}] + history
                     raw_response = await loop.run_in_executor(
-                        None, lambda: chat.generate(frame_messages, max_new_tokens=600)
+                        None, lambda: chat.generate(frame_messages, max_new_tokens=2500)
                     )
                 except Exception as e:
                     print(f"  Resonant frame error: {e}")
