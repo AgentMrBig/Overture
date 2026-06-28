@@ -302,8 +302,10 @@ class ChatModel:
             )
 
         # Decode only the new tokens — keep think blocks so server can extract them
+        # skip_special_tokens=False preserves <think> tags but leaks <|im_end|> etc — strip manually
         new_tokens = output[0][inputs['input_ids'].shape[1]:]
         response = self.tokenizer.decode(new_tokens, skip_special_tokens=False).strip()
+        response = re.sub(r'<\|[^>]+\|>', '', response).strip()
         return response
 
 
