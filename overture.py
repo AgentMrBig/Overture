@@ -157,7 +157,8 @@ class OvertureFrame:
                 self.bge_student.eval()
                 self.bge_embedder = BGEEmbedder(self.device)
                 self.bge_embedder.load()
-                print(f"  {green('BGE student loaded')} {gray(f'(corr={ckpt.get(\"final_corr\", 0):.3f})')}")
+                corr_val = ckpt.get('final_corr', 0)
+                print(f"  {green('BGE student loaded')} {gray(f'(corr={corr_val:.3f})')}")
             except Exception as e:
                 print(f"  {gray(f'BGE student not loaded: {e}')}")
 
