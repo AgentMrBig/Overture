@@ -504,7 +504,7 @@ if __name__ == '__main__':
     BATCH_SIZE  = 256
     N_EPOCHS    = 60
     LR          = 2e-3
-    INPUT_DIM   = 768    # BGE-small-en-v1.5 output dim
+    INPUT_DIM   = 384    # BGE-small-en-v1.5 output dim (small = 384, not 768)
 
     # Load embedder
     embedder = BGEEmbedder(device)
