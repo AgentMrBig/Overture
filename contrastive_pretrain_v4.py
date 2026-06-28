@@ -256,14 +256,28 @@ def build_corpus(embedder=None, target_size: int = 5000) -> list:
         "Human factors engineering designs technology to match human cognitive and physical limits.",
     ]
 
-    # Expand with paraphrases and variations by shuffling subsets
+    # Expand corpus with variations for more pair diversity
     expanded = list(seeds)
-    # Add negations, questions, and partial variants for diversity
     extras = []
-    for s in seeds[:100]:
+    for s in seeds:
         words = s.split()
         if len(words) > 8:
+            # First half
             extras.append(' '.join(words[:len(words)//2]) + '.')
+            # Second half
+            extras.append(' '.join(words[len(words)//2:]) + '.')
+        if len(words) > 6:
+            # Reversed word order (creates geometric contrast)
+            extras.append(' '.join(words[::-1]) + '.')
+    # Add contrasting/negated versions of first 80 seeds
+    negations = [
+        "not", "never", "without", "unlike", "contrary to", "opposite of"
+    ]
+    for s in seeds[:80]:
+        words = s.split()
+        if len(words) > 5:
+            neg = negations[len(extras) % len(negations)]
+            extras.append(f"Unlike the idea that {s[0].lower()}{s[1:]}")
     expanded.extend(extras)
 
     random.shuffle(expanded)
@@ -499,11 +513,11 @@ if __name__ == '__main__':
     if device.type == 'cuda':
         print(f"GPU: {torch.cuda.get_device_name(0)}")
 
-    TARGET_SIZE = 500   # use unique seeds only — no repetition needed
-    N_PAIRS     = 5000
-    BATCH_SIZE  = 256
-    N_EPOCHS    = 60
-    LR          = 2e-3
+    TARGET_SIZE = 2000   # more sentences = more pair diversity
+    N_PAIRS     = 20000
+    BATCH_SIZE  = 512
+    N_EPOCHS    = 100
+    LR          = 3e-3
     INPUT_DIM   = 384    # BGE-small-en-v1.5 output dim (small = 384, not 768)
 
     # Load embedder
