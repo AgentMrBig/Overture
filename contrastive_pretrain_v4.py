@@ -319,34 +319,26 @@ class PairDataset(Dataset):
         sim = np.nan_to_num(sim, nan=0.0, posinf=1.0, neginf=-1.0)
         sim = np.clip(sim, -1.0, 1.0)
 
-        # Stratified sampling across similarity range
-        weights      = [3, 2, 1, 1, 1, 1, 1, 1, 2, 3]
-        total_weight = sum(weights)
-        targets      = {b: max(1, int(n_pairs * w / total_weight))
-                        for b, w in enumerate(weights)}
-        buckets      = {b: [] for b in range(10)}
-        filled, attempts = 0, 0
+        # Hard-mine the lowest-similarity pairs to balance the training distribution.
+        # BGE-small gives inflated scores so we need to explicitly seek out low-sim pairs.
+        all_pairs = []
+        for i in range(n):
+            for j in range(i + 1, n):
+                all_pairs.append((i, j, float(sim[i, j])))
 
-        while filled < n_pairs and attempts < n_pairs * 200:
-            i, j = rng.randint(0, n, 2)
-            if i == j:
-                attempts += 1
-                continue
-            if i > j:
-                i, j = j, i
-            s      = float(sim[i, j])
-            if np.isnan(s):
-                attempts += 1
-                continue
-            bucket = min(int((s + 1.0) * 5), 9)  # map [-1,1] → [0,9]
-            if len(buckets[bucket]) < targets[bucket]:
-                buckets[bucket].append((i, j))
-                filled += 1
-            attempts += 1
+        all_pairs.sort(key=lambda x: x[2])  # sort by similarity ascending
 
-        self.pairs = []
-        for b in buckets.values():
-            self.pairs.extend(b)
+        # 40% hardest negatives (lowest sim), 20% hardest positives (highest sim), 40% random
+        n_hard_neg = int(n_pairs * 0.40)
+        n_hard_pos = int(n_pairs * 0.20)
+        n_random   = n_pairs - n_hard_neg - n_hard_pos
+
+        hard_neg = [(i, j) for i, j, _ in all_pairs[:n_hard_neg]]
+        hard_pos = [(i, j) for i, j, _ in all_pairs[-n_hard_pos:]]
+        rng.shuffle(all_pairs)
+        random_pairs = [(i, j) for i, j, _ in all_pairs[:n_random]]
+
+        self.pairs = hard_neg + hard_pos + random_pairs
         rng.shuffle(self.pairs)
         self.pairs = self.pairs[:n_pairs]
         self.sim   = sim
@@ -466,13 +458,14 @@ def train(student, loader, val_sentences, embedder, device,
 
     optimizer = optim.AdamW(student.parameters(), lr=lr, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_epochs)
+    criterion = CombinedLoss()
 
     print(f"\n{'═'*66}")
     print(f"  Contrastive Pre-training v4 — BGE-small-en-v1.5 teacher")
-    print(f"  Loss: InfoNCE (τ={temperature})  |  Target: >{target_corr:.0%} corr  |  Epochs: {n_epochs}")
+    print(f"  Loss: MSE+Margin | Hard-mined negatives  |  Target: >{target_corr:.0%} corr")
     print(f"{'═'*66}")
-    print(f"  {'Ep':>4}  {'Loss':>10}  {'Corr':>8}  {'Time':>6}")
-    print(f"  {'─'*36}")
+    print(f"  {'Ep':>4}  {'Loss':>10}  {'MSE':>8}  {'Margin':>8}  {'Corr':>8}  {'Time':>6}")
+    print(f"  {'─'*56}")
 
     best_corr, best_state = 0.0, None
     t_start = time.perf_counter()
@@ -480,18 +473,19 @@ def train(student, loader, val_sentences, embedder, device,
     for epoch in range(1, n_epochs + 1):
         t_ep = time.perf_counter()
         student.train()
-        total_l = []
+        total_l, mse_l, margin_l = [], [], []
 
-        for a, b, _ in loader:   # ignore MSE targets — InfoNCE uses batch negatives
-            a, b = a.to(device), b.to(device)
+        for a, b, target in loader:
+            a, b, target = a.to(device), b.to(device), target.to(device)
             optimizer.zero_grad()
-            za = student.encode_one(a)
-            zb = student.encode_one(b)
-            loss = infonce_loss(za, zb, temperature)
+            pred = student(a, b)
+            loss, mse, margin = criterion(pred, target)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(student.parameters(), 1.0)
             optimizer.step()
             total_l.append(loss.item())
+            mse_l.append(mse.item())
+            margin_l.append(margin.item())
 
         scheduler.step()
         elapsed = time.perf_counter() - t_ep
@@ -502,14 +496,16 @@ def train(student, loader, val_sentences, embedder, device,
             if corr > best_corr:
                 best_corr  = corr
                 best_state = {k: v.clone() for k, v in student.state_dict().items()}
-            print(f"  {epoch:>4}  {np.mean(total_l):>10.6f}  {corr:>8.4f}  {elapsed:>5.1f}s {star}")
+            print(f"  {epoch:>4}  {np.mean(total_l):>10.6f}  {np.mean(mse_l):>8.6f}  "
+                  f"{np.mean(margin_l):>8.6f}  {corr:>8.4f}  {elapsed:>5.1f}s {star}")
             if corr >= target_corr:
                 print(f"\n  Target {target_corr:.0%} reached at epoch {epoch}!")
                 break
         else:
-            print(f"  {epoch:>4}  {np.mean(total_l):>10.6f}  {'─':>8}  {elapsed:>5.1f}s")
+            print(f"  {epoch:>4}  {np.mean(total_l):>10.6f}  {np.mean(mse_l):>8.6f}  "
+                  f"{np.mean(margin_l):>8.6f}  {'─':>8}  {elapsed:>5.1f}s")
 
-    print(f"  {'─'*36}")
+    print(f"  {'─'*56}")
     print(f"  Best corr : {best_corr:.4f}  |  Time: {(time.perf_counter()-t_start)/60:.1f} min")
     print(f"{'═'*66}\n")
     return best_corr, best_state
